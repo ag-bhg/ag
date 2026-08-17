@@ -119,6 +119,23 @@
   .saveditem .actions .del{border-color:var(--rose); color:var(--rose);}
   .emptynote{font-size:12.5px; color:var(--ink-dim); text-align:center; padding:14px 0;}
 
+  .savedPicker .selectWrap{position:relative;}
+  .savedPicker select#savedSelect{
+    width:100%; appearance:none; -webkit-appearance:none;
+    background:var(--panel-2); border:1px solid var(--line); color:var(--ink);
+    font-family:var(--sans); font-size:14px; font-weight:600;
+    padding:12px 36px 12px 14px; border-radius:10px; cursor:pointer;
+  }
+  .savedPicker .selectWrap::after{
+    content:'▾'; position:absolute; right:14px; top:50%; transform:translateY(-50%);
+    color:var(--teal); pointer-events:none; font-size:14px;
+  }
+  .savedPicker .savedMetaLine{font-size:11.5px; color:var(--ink-dim); font-family:var(--mono); margin-top:8px;}
+  .savedPicker .savedActionsRow{display:flex; gap:8px; margin-top:10px;}
+  .savedPicker .savedActionsRow .btn{flex:1;}
+  .savedPicker .savedActionsRow .load{border-color:var(--teal); color:var(--teal);}
+  .savedPicker .savedActionsRow .del{border-color:var(--rose); color:var(--rose);}
+
   .poscol-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
   .poscol-head .name{font-size:12px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.08em; font-weight:700;}
   .lastbadge{
@@ -213,7 +230,17 @@
   <div class="card">
     <h2>Data Tersimpan <span id="cloudStatus" style="text-transform:none; color:var(--ink-dim); font-weight:400;">· menghubungkan ke cloud...</span></h2>
     <p class="hint" style="margin-top:0;">Simpan beberapa kumpulan data historis dengan nama berbeda, lalu muat atau hapus kapan saja. Otomatis tersinkron ke semua perangkatmu lewat cloud.</p>
-    <div id="savedList"></div>
+    <div id="savedList" class="savedPicker">
+      <p class="hint emptynote" id="savedEmptyNote" style="display:none;">Belum ada data tersimpan.</p>
+      <div class="selectWrap" id="savedSelectWrap">
+        <select id="savedSelect"></select>
+      </div>
+      <div class="savedMetaLine" id="savedMetaLine"></div>
+      <div class="savedActionsRow" id="savedActionsRow">
+        <button class="btn load" id="savedLoadBtn">📂 Muat</button>
+        <button class="btn del" id="savedDelBtn">🗑 Hapus</button>
+      </div>
+    </div>
   </div>
 
   <div class="card" id="resultCard" style="display:none;">
@@ -1249,47 +1276,66 @@ function setSavedEntries(list){
   }
 }
 
+function updateSavedMeta(){
+  const entries = getSavedEntries();
+  const select = document.getElementById('savedSelect');
+  const metaLine = document.getElementById('savedMetaLine');
+  const entry = entries[select.selectedIndex];
+  if(!entry){ metaLine.textContent = ''; return; }
+  const count = parseData(entry.data).length;
+  metaLine.textContent = `${count} data · disimpan ${entry.savedAt}`;
+}
+
 function renderSavedList(){
   const entries = getSavedEntries();
-  const box = document.getElementById('savedList');
+  const select = document.getElementById('savedSelect');
+  const emptyNote = document.getElementById('savedEmptyNote');
+  const selectWrap = document.getElementById('savedSelectWrap');
+  const actionsRow = document.getElementById('savedActionsRow');
+  const metaLine = document.getElementById('savedMetaLine');
+
   if(entries.length === 0){
-    box.innerHTML = '<p class="emptynote">Belum ada data tersimpan.</p>';
+    emptyNote.style.display = 'block';
+    selectWrap.style.display = 'none';
+    actionsRow.style.display = 'none';
+    metaLine.style.display = 'none';
+    select.innerHTML = '';
     return;
   }
-  box.innerHTML = entries.map((e, idx) => {
-    const count = parseData(e.data).length;
-    return `<div class="saveditem">
-      <div class="info">
-        <div class="name">${e.name}</div>
-        <div class="meta">${count} data · disimpan ${e.savedAt}</div>
-      </div>
-      <div class="actions">
-        <button class="load" data-idx="${idx}">Muat</button>
-        <button class="del" data-idx="${idx}">Hapus</button>
-      </div>
-    </div>`;
-  }).join('');
+  emptyNote.style.display = 'none';
+  selectWrap.style.display = '';
+  actionsRow.style.display = '';
+  metaLine.style.display = '';
 
-  box.querySelectorAll('.load').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const entry = getSavedEntries()[parseInt(btn.dataset.idx, 10)];
-      if(!entry) return;
-      document.getElementById('dataInput').value = entry.data;
-      document.getElementById('saveNameInput').value = entry.name;
-      analyze();
-    });
-  });
-  box.querySelectorAll('.del').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if(!checkSecurityCode('menghapus data ini')) return;
-      const idx = parseInt(btn.dataset.idx, 10);
-      const entries = getSavedEntries().slice();
-      entries.splice(idx, 1);
-      setSavedEntries(entries);
-      renderSavedList();
-    });
-  });
+  const prevValue = select.value;
+  select.innerHTML = entries.map(e => `<option value="${e.name}">${e.name}</option>`).join('');
+  // pertahankan pilihan sebelumnya kalau namanya masih ada di daftar
+  if(entries.some(e => e.name === prevValue)) select.value = prevValue;
+  updateSavedMeta();
 }
+
+document.getElementById('savedSelect').addEventListener('change', updateSavedMeta);
+
+document.getElementById('savedLoadBtn').addEventListener('click', () => {
+  const entries = getSavedEntries();
+  const entry = entries[document.getElementById('savedSelect').selectedIndex];
+  if(!entry) return;
+  document.getElementById('dataInput').value = entry.data;
+  document.getElementById('saveNameInput').value = entry.name;
+  analyze();
+});
+
+document.getElementById('savedDelBtn').addEventListener('click', () => {
+  const entries = getSavedEntries();
+  const idx = document.getElementById('savedSelect').selectedIndex;
+  const entry = entries[idx];
+  if(!entry) return;
+  if(!checkSecurityCode(`menghapus data "${entry.name}"`)) return;
+  const updated = entries.slice();
+  updated.splice(idx, 1);
+  setSavedEntries(updated);
+  renderSavedList();
+});
 
 document.getElementById('saveDataBtn').addEventListener('click', () => {
   const data = document.getElementById('dataInput').value;
