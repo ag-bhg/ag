@@ -269,10 +269,33 @@
       <div class="lbl">Kesimpulan Angka Ikut</div>
       <p class="hint" id="simpulanCB" style="margin:0 0 10px;"></p>
       <div class="row" style="margin-top:0;">
-        <button class="btn" id="pakaiCB1Btn">↳ Peluang Terbaik 1</button>
-        <button class="btn" id="pakaiCB2Btn">↳ Peluang Terbaik 2</button>
-        <button class="btn" id="pakaiCB3Btn">↳ Peluang Terbaik 3</button>
+        <button class="btn" id="pakaiCB1Btn">↳ Pakai Peluang Terbaik 1</button>
+        <button class="btn" id="pakaiCB2Btn">↳ Pakai Peluang Terbaik 2</button>
+        <button class="btn" id="pakaiCB3Btn">↳ Pakai Peluang Terbaik 3</button>
       </div>
+    </div>
+    <h2 style="margin-top:18px;">ANALISIS SHIO 2D 4D</h2>
+    <p class="hint" style="margin-top:0;">Dihitung dari 3 pasangan digit dalam satu angka 4D: <b>AC</b> (posisi 1-2), <b>CK</b> (posisi 2-3), <b>KE</b> (posisi 3-4, 2D asli). Tiap pasangan diubah ke angka 0-99 lalu dicari sisa bagi 12 untuk menentukan shio (sisa 0 = Shio 12). Persentase ketiga posisi dijumlahkan jadi "Total Hadir di 4D" per shio. Hanya tersedia untuk data 4 digit.</p>
+    <div id="shioCol"></div>
+    <p class="hint" id="simpulanShio" style="margin:10px 0 0;"></p>
+    <div class="kandidat" style="margin-top:10px;">
+      <div class="lbl">Pilih Shio (dipakai langsung sebagai Filter AI Shio 4D)</div>
+      <div class="row" id="shioPickGroup" style="margin-top:6px;">
+        <label class="chk"><input type="checkbox" id="filterShioAll"> Pilih Semua</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="1"> Shio 1</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="2"> Shio 2</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="3"> Shio 3</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="4"> Shio 4</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="5"> Shio 5</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="6"> Shio 6</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="7"> Shio 7</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="8"> Shio 8</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="9"> Shio 9</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="10"> Shio 10</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="11"> Shio 11</label>
+        <label class="chk"><input type="checkbox" class="shioPick" data-shio="12"> Shio 12</label>
+      </div>
+      <p class="hint" id="shioPickNote" style="margin:8px 0 0;">Centang salah satu atau lebih shio di atas untuk dipakai sebagai Filter AI Shio 4D. Kombinasi lolos filter kalau salah satu dari AC/CK/KE-nya masuk shio yang dicentang.</p>
     </div>
   </div>
 
@@ -311,8 +334,8 @@
 
     <div class="row" style="margin-top:10px;">
       <div style="flex:1; min-width:130px;">
-        <label style="display:block; font-size:11px; color:var(--ink-dim); margin-bottom:5px; text-transform:uppercase; letter-spacing:.06em;">Colok Bebas (wajib ada)</label>
-        <input type="text" id="filterCB" maxlength="6" placeholder="mis. 27" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:14px; padding:8px 10px; border-radius:8px;">
+        <label style="display:block; font-size:11px; color:var(--ink-dim); margin-bottom:5px; text-transform:uppercase; letter-spacing:.06em;">Ai 2D (cek posisi K &amp; E)</label>
+        <input type="text" id="filterCB" maxlength="6" placeholder="mis. 01" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:14px; padding:8px 10px; border-radius:8px;">
       </div>
       <div style="flex:1; min-width:130px;">
         <label style="display:block; font-size:11px; color:var(--ink-dim); margin-bottom:5px; text-transform:uppercase; letter-spacing:.06em;">Angka Ikut (tampilkan jika ada salah satu)</label>
@@ -559,7 +582,21 @@ function renderModeTable(modeKey, result, posLabels){
 }
 
 function parseData(raw){
-  const tokens = raw.split(/[\s,\*]+/).map(s => s.replace(/[^0-9]/g,'')).filter(s => s.length > 0);
+  // Kalau satu baris punya banyak kolom (dipisah tab/spasi ganda, mis. Tanggal - Kode - Angka),
+  // ambil HANYA kolom paling kanan sebagai data historis, lalu ambil 4 digit dari kanan kolom itu.
+  // Baris berformat lama (angka polos dipisah spasi/koma/*) tetap berjalan seperti biasa.
+  const tokens = [];
+  raw.split(/\n+/).forEach(line => {
+    const trimmedLine = line.trim();
+    if(!trimmedLine) return;
+    const cols = trimmedLine.split(/\t+| {2,}/).filter(c => c.trim().length > 0);
+    const lastCol = cols.length > 1 ? cols[cols.length - 1] : trimmedLine;
+    lastCol.split(/[\s,\*]+/).forEach(field => {
+      const digitsOnly = field.replace(/[^0-9]/g, '');
+      if(digitsOnly.length === 0) return;
+      tokens.push(digitsOnly.length > 4 ? digitsOnly.slice(-4) : digitsOnly);
+    });
+  });
   return tokens;
 }
 
@@ -634,6 +671,7 @@ function analyze(){
 
   renderJumlahSelisih(used);
   renderColokBebas(used);
+  renderShioAnalysis(used, targetLen);
 
   lastAnalysis = { targetLen, posLabels, transitionWeights: modeResults.normal.transitionWeights, lastDigits: modeResults.normal.lastDigits, globalStats: modeResults.normal.globalStats };
   lastHistoryNumbers = used;
@@ -779,6 +817,96 @@ function renderColokBebas(used){
     + `Tombol Peluang Terbaik 1/2/3 di bawah akan langsung mengisi digit terpilih ke kolom <b style="color:var(--ink);">Angka Ikut</b> pada Filter Pangkas Kombinasi. `
     + `Catatan: filter Angka Ikut meloloskan angka yang mengandung SALAH SATU dari digit yang dimasukkan — makin banyak digit dipasang, makin besar peluang cocok, tapi jumlah kombinasi yang lolos juga makin banyak.`;
 }
+
+// ---------- Analisis Shio 2D 4D (AC/CK/KE -> sisa bagi 12) ----------
+let shioTotals = {}; // { '1': totalPct, '2': totalPct, ... } — diisi ulang tiap renderShioAnalysis()
+
+function shioOf12(twoDigitStr){
+  const n = parseInt(twoDigitStr, 10);
+  const r = n % 12;
+  return r === 0 ? 12 : r;
+}
+
+function renderShioAnalysis(used, targetLen){
+  const jsCard = document.getElementById('jsCard');
+  const shioHeading = [...jsCard.querySelectorAll('h2')].find(h => h.textContent.includes('SHIO'));
+  const shioBlocks = [shioHeading, shioHeading?.nextElementSibling, document.getElementById('shioCol'),
+    document.getElementById('simpulanShio'), document.getElementById('simpulanShio')?.nextElementSibling];
+
+  if(targetLen !== 4){
+    shioBlocks.forEach(el => { if(el) el.style.display = 'none'; });
+    shioTotals = {};
+    return;
+  }
+  shioBlocks.forEach(el => { if(el) el.style.display = ''; });
+
+  const countsAC = new Array(13).fill(0);
+  const countsCK = new Array(13).fill(0);
+  const countsKE = new Array(13).fill(0);
+  used.forEach(num => {
+    countsAC[shioOf12(num.slice(0,2))]++;
+    countsCK[shioOf12(num.slice(1,3))]++;
+    countsKE[shioOf12(num.slice(2,4))]++;
+  });
+  const total = used.length || 1;
+
+  const ranked = [];
+  for(let s = 1; s <= 12; s++){
+    const pctAC = countsAC[s]/total*100;
+    const pctCK = countsCK[s]/total*100;
+    const pctKE = countsKE[s]/total*100;
+    ranked.push({ s: String(s), pctAC, pctCK, pctKE, totalPct: pctAC+pctCK+pctKE });
+  }
+  ranked.sort((a,b) => b.totalPct - a.totalPct);
+
+  shioTotals = {};
+  ranked.forEach(r => { shioTotals[r.s] = r.totalPct; });
+
+  const top3 = ranked.slice(0, 3);
+  const top3Set = new Set(top3.map(r => r.s));
+
+  const container = document.getElementById('shioCol');
+  container.innerHTML = `<div class="poscol" style="width:100%;">
+      <div class="poscol-head">
+        <span class="name">Total Hadir di 4D (AC + CK + KE)</span>
+        <span class="lastbadge">${used.length} data</span>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px 8px;">
+        ${ranked.map(r => `<span class="topchip ${top3Set.has(r.s) ? 'top' : ''}"><b>Shio ${r.s}</b>${r.totalPct.toFixed(1)}%</span>`).join('')}
+      </div>
+    </div>`;
+
+  document.getElementById('simpulanShio').innerHTML =
+    `Shio dengan peluang hadir tertinggi di 4D: <b style="color:var(--ink);">Shio ${top3.map(r => r.s).join(', Shio ')}</b> `
+    + `(${top3.map(r => r.totalPct.toFixed(1)+'%').join(', ')}). Dihitung dari penjumlahan persentase kemunculan shio yang sama di posisi AC, CK, dan KE secara terpisah — bukan tebakan 1 shio, tapi akumulasi dari 3 sudut pandang data yang sama.`;
+
+  updateShioPickNote();
+}
+
+function updateShioPickNote(){
+  const checked = [...document.querySelectorAll('.shioPick:checked')].map(el => el.dataset.shio);
+  const note = document.getElementById('shioPickNote');
+  if(checked.length === 0){
+    note.textContent = 'Centang salah satu atau lebih shio di atas untuk dipakai sebagai Filter AI Shio 4D. Kombinasi lolos filter kalau salah satu dari AC/CK/KE-nya masuk shio yang dicentang.';
+    return;
+  }
+  const sum = checked.reduce((a, s) => a + (shioTotals[s] || 0), 0);
+  const avg = sum / checked.length;
+  note.innerHTML = `Shio dicentang: <b style="color:var(--ink);">${checked.map(s => 'Shio '+s).join(', ')}</b> — rata-rata peluang hadir gabungan: <b style="color:var(--teal);">${avg.toFixed(1)}%</b> (dari ${checked.length} shio). Filter AI Shio 4D akan meloloskan kombinasi jika salah satu dari AC/CK/KE-nya cocok ke salah satu shio ini.`;
+}
+
+document.querySelectorAll('.shioPick').forEach(cb => {
+  cb.addEventListener('change', () => {
+    const all = document.querySelectorAll('.shioPick').length;
+    const checked = document.querySelectorAll('.shioPick:checked').length;
+    document.getElementById('filterShioAll').checked = (all === checked && all > 0);
+    updateShioPickNote();
+  });
+});
+document.getElementById('filterShioAll').addEventListener('change', e => {
+  document.querySelectorAll('.shioPick').forEach(cb => cb.checked = e.target.checked);
+  updateShioPickNote();
+});
 
 document.getElementById('pakaiJumlahBtn').addEventListener('click', () => {
   if(!jsTopValues.jumlah.length) return;
@@ -953,7 +1081,15 @@ function applyFilters(){
   let filtered = source;
   if(noTwin) filtered = filtered.filter(isNoTwin);
   if(excludeHistory) filtered = filtered.filter(num => !historySet.has(num));
-  if(cb) filtered = filtered.filter(num => cb.split('').every(d => num.includes(d)));
+  if(cb){
+    // Ai 2D: cek hanya ke posisi K (puluhan) & E (satuan) = 2 digit terakhir.
+    // Lolos kalau salah satu digit yang diisi cocok dengan salah satu dari K/E (logika OR).
+    const cbDigits = new Set(cb.split(''));
+    filtered = filtered.filter(num => {
+      const ke = num.slice(-2).split('');
+      return ke.some(d => cbDigits.has(d));
+    });
+  }
   if(ai){
     const included = new Set(ai.split(''));
     filtered = filtered.filter(num => num.split('').some(d => included.has(d)));
@@ -973,6 +1109,17 @@ function applyFilters(){
   if(twinMurniPairs.length > 0){
     filtered = filtered.filter(num => twinMurniPairs.some(([i, j]) => matchesPairPattern(num, i, j)));
   }
+  const shioSelected = [...document.querySelectorAll('.shioPick:checked')].map(el => el.dataset.shio);
+  if(shioSelected.length > 0 && lastPosLabels && lastPosLabels.length === 4){
+    // Filter AI Shio 4D: lolos kalau salah satu dari AC/CK/KE kombinasi masuk ke shio yang dicentang.
+    const shioSet = new Set(shioSelected.map(s => parseInt(s, 10)));
+    filtered = filtered.filter(num => {
+      const ac = shioOf12(num.slice(0,2));
+      const ck = shioOf12(num.slice(1,3));
+      const ke = shioOf12(num.slice(2,4));
+      return shioSet.has(ac) || shioSet.has(ck) || shioSet.has(ke);
+    });
+  }
 
   document.getElementById('filterOut').value = filtered.length ? (filtered.join('*') + '*') : '(tidak ada hasil dengan filter ini)';
   document.getElementById('filterCountOut').textContent = filtered.length;
@@ -987,6 +1134,9 @@ function resetFilters(){
   document.getElementById('filterSelisih').value = '';
   document.getElementById('filterTwinMurniAll').checked = false;
   document.querySelectorAll('.twinMurniPick').forEach(cb => cb.checked = false);
+  document.getElementById('filterShioAll').checked = false;
+  document.querySelectorAll('.shioPick').forEach(cb => cb.checked = false);
+  updateShioPickNote();
   applyFilters();
 }
 
@@ -1036,6 +1186,11 @@ function checkSecurityCode(actionLabel){
 const SAVE_KEY = 'analisaFrekuensi_savedData';
 let savedEntriesCache = []; // sumber utama untuk render — diisi dari Firebase, fallback ke localStorage
 let firebaseReady = false;
+
+// Tampilkan data lokal DULU (instan, tanpa nunggu internet) supaya panel tidak kosong saat koneksi lambat.
+// Nanti kalau cloud berhasil connect, list ini di-refresh otomatis (lihat authReadyPromise.then di bawah).
+savedEntriesCache = loadSavedEntriesFromStorage();
+renderSavedList();
 
 const firebaseConfig = {
   apiKey: "AIzaSyB1yunsgfeJ-cyjx24hb0mG9nnVDOHfzl4",
@@ -1195,7 +1350,19 @@ if(db){
 } else {
   savedEntriesCache = loadSavedEntriesFromStorage();
   renderSavedList();
+  const statusEl = document.getElementById('cloudStatus');
+  if(statusEl){ statusEl.textContent = '· ⚠️ cloud tidak tersedia, pakai data lokal'; statusEl.style.color = 'var(--rose)'; }
 }
+
+// Kalau proses konek cloud belum selesai juga setelah 8 detik (mis. koneksi sangat lambat),
+// kasih status yang jujur — bukan biarkan "menghubungkan ke cloud..." menggantung tanpa kejelasan.
+setTimeout(() => {
+  const statusEl = document.getElementById('cloudStatus');
+  if(statusEl && statusEl.textContent.includes('menghubungkan')){
+    statusEl.textContent = '· koneksi lambat, menampilkan data lokal sementara';
+    statusEl.style.color = 'var(--amber)';
+  }
+}, 8000);
 
 // tampilan awal dikosongkan — tunggu user tempel data sendiri
 window.addEventListener('DOMContentLoaded', () => {
