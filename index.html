@@ -860,6 +860,18 @@ document.getElementById('bulkCopyBtn').addEventListener('click', () => {
 
 document.getElementById('analyzeBtn').addEventListener('click', analyze);
 
+// ---------- Kode Keamanan (proteksi ringan untuk Simpan & Hapus) ----------
+const SECURITY_CODE = '321';
+function checkSecurityCode(actionLabel){
+  const input = prompt(`Masukkan kode keamanan untuk ${actionLabel}:`);
+  if(input === null) return false; // dibatalkan
+  if(input !== SECURITY_CODE){
+    alert('Kode salah. Aksi dibatalkan.');
+    return false;
+  }
+  return true;
+}
+
 // ---------- Simpan / Muat / Hapus data historis (Firebase Realtime Database) ----------
 const SAVE_KEY = 'analisaFrekuensi_savedData';
 let savedEntriesCache = []; // sumber utama untuk render — diisi dari Firebase, fallback ke localStorage
@@ -940,12 +952,7 @@ function renderSavedList(){
   });
   box.querySelectorAll('.del').forEach(btn => {
     btn.addEventListener('click', () => {
-      if(btn.dataset.confirm !== '1'){
-        btn.dataset.confirm = '1';
-        btn.textContent = 'Yakin?';
-        setTimeout(() => { btn.dataset.confirm = '0'; btn.textContent = 'Hapus'; }, 2500);
-        return;
-      }
+      if(!checkSecurityCode('menghapus data ini')) return;
       const idx = parseInt(btn.dataset.idx, 10);
       const entries = getSavedEntries().slice();
       entries.splice(idx, 1);
@@ -963,6 +970,7 @@ document.getElementById('saveDataBtn').addEventListener('click', () => {
     feedback.style.color = 'var(--rose)';
     return;
   }
+  if(!checkSecurityCode('menyimpan data ini')) return;
   const entries = getSavedEntries().slice();
   const nameInput = document.getElementById('saveNameInput');
   const trimmed = nameInput.value.trim() || `Data ${entries.length + 1}`;
