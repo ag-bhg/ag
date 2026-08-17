@@ -187,8 +187,8 @@
   </div>
 
   <div class="card">
-    <h2>Data Tersimpan</h2>
-    <p class="hint" style="margin-top:0;">Simpan beberapa kumpulan data historis dengan nama berbeda, lalu muat atau hapus kapan saja. Tersimpan di perangkatmu sendiri (browser), tidak dikirim ke mana pun.</p>
+    <h2>Data Tersimpan <span id="cloudStatus" style="text-transform:none; color:var(--ink-dim); font-weight:400;">· menghubungkan ke cloud...</span></h2>
+    <p class="hint" style="margin-top:0;">Simpan beberapa kumpulan data historis dengan nama berbeda, lalu muat atau hapus kapan saja. Otomatis tersinkron ke semua perangkatmu lewat cloud.</p>
     <div id="savedList"></div>
   </div>
 
@@ -223,17 +223,16 @@
       </div>
     </div>
 
-    <h2 style="margin-top:18px;">Analisis Colok Bebas</h2>
+    <h2 style="margin-top:18px;">ANALISIS ANGKA IKUT 4D</h2>
     <p class="hint" style="margin-top:0;">Persentase dihitung dari berapa banyak data historis yang mengandung digit tersebut di posisi mana pun (bukan sekadar frekuensi mentah), jadi digit kembar dalam satu angka tidak menggelembungkan hasil.</p>
     <div id="cbCol"></div>
     <div class="kandidat" style="margin-top:14px;">
-      <div class="lbl">Kesimpulan Colok Bebas</div>
+      <div class="lbl">Kesimpulan Angka Ikut</div>
       <p class="hint" id="simpulanCB" style="margin:0 0 10px;"></p>
       <div class="row" style="margin-top:0;">
         <button class="btn" id="pakaiCB1Btn">↳ Peluang Terbaik 1</button>
         <button class="btn" id="pakaiCB2Btn">↳ Peluang Terbaik 2</button>
         <button class="btn" id="pakaiCB3Btn">↳ Peluang Terbaik 3</button>
-        <button class="btn" id="pakaiCB4Btn">↳ Peluang Terbaik 4 (≥90%)</button>
       </div>
     </div>
   </div>
@@ -326,6 +325,8 @@
   <footer>Semua proses berjalan di perangkatmu — tidak ada data yang dikirim keluar.</footer>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
 let lastAnalysis = null; // { targetLen, posNames, transitionWeights, lastDigits, globalStats }
 let lastHistoryNumbers = []; // data historis yang dipakai untuk filter "buang yang sudah keluar"
@@ -364,7 +365,7 @@ function analyze(){
     lastTop8Pools = [];
     lastHistoryNumbers = [];
     jsTopValues = { jumlah: [], selisih: [] };
-    cbTopValues = { top1: null, top2: null, top3: null, top90: null };
+    cbTopValues = { top1: null, top2: null, top3: null };
     return;
   }
 
@@ -545,7 +546,7 @@ function renderJumlahSelisih(used){
   document.getElementById('jsCard').style.display = 'block';
 }
 
-let cbTopValues = { top1: null, top2: null, top3: null, top90: null }; // digit terbaik Colok Bebas per level peluang gabungan
+let cbTopValues = { top1: null, top2: null, top3: null }; // digit terbaik Angka Ikut per level Peluang Terbaik 1/2/3
 
 function renderColokBebas(used){
   // hitung berdasarkan KEBERADAAN digit di tiap angka (unik per angka), bukan frekuensi mentah,
@@ -560,28 +561,23 @@ function renderColokBebas(used){
     .map((c, d) => ({ d: String(d), c, pct: c/total*100 }))
     .sort((a,b) => b.c - a.c);
 
-  // ---------- Peluang GABUNGAN bertahap (greedy set-cover) ----------
-  // tiap langkah menambahkan 1 digit yang PALING MENAMBAH cakupan data historis
-  // (bukan sekadar digit dengan frekuensi individu tertinggi), sehingga peluang
-  // "salah satu dari digit terpilih muncul di angka tsb" naik maksimal tiap langkah.
-  const steps = [];
-  const remaining = new Set(ranked.map(r => r.d));
-  const selected = [];
-  const covered = new Array(used.length).fill(false);
-  let coveredCount = 0;
-  while(remaining.size > 0 && coveredCount < used.length){
-    let bestDigit = null, bestGain = -1;
-    remaining.forEach(d => {
-      let gain = 0;
-      used.forEach((num, idx) => { if(!covered[idx] && num.includes(d)) gain++; });
-      if(gain > bestGain){ bestGain = gain; bestDigit = d; }
-    });
-    if(bestGain <= 0) break; // sisa digit tidak menambah cakupan sama sekali
-    selected.push(bestDigit);
-    remaining.delete(bestDigit);
-    used.forEach((num, idx) => { if(!covered[idx] && num.includes(bestDigit)) { covered[idx] = true; coveredCount++; } });
-    steps.push({ digits: selected.slice(), pct: coveredCount / total * 100 });
-  }
+  // ---------- Peluang Terbaik 1/2/3 (Angka Ikut) ----------
+  // Peluang Terbaik 1 = peluang digit dengan persentase individu TERBESAR.
+  // Peluang Terbaik 2 = peluang terbesar no.1 DITAMBAH peluang terbesar no.2.
+  // Peluang Terbaik 3 = peluang terbesar no.1 + no.2 + no.3 dijumlahkan.
+  const top1 = ranked[0];
+  const top2 = ranked[1] || ranked[0];
+  const top3 = ranked[2] || top2;
+
+  const pct1 = top1.pct;
+  const pct2 = top1.pct + top2.pct;
+  const pct3 = top1.pct + top2.pct + top3.pct;
+
+  cbTopValues = {
+    top1: top1.d,
+    top2: top1.d + top2.d,
+    top3: top1.d + top2.d + top3.d
+  };
 
   const top6Set = new Set(ranked.slice(0, 6).map(r => r.d));
   const container = document.getElementById('cbCol');
@@ -590,7 +586,7 @@ function renderColokBebas(used){
   col.className = 'poscol';
   col.style.width = '100%';
   col.innerHTML = `<div class="poscol-head">
-      <span class="name">Colok Bebas</span>
+      <span class="name">Angka Ikut</span>
       <span class="lastbadge">${used.length} data</span>
     </div>
     <div style="display:flex; flex-wrap:wrap; gap:6px 8px;">
@@ -598,32 +594,16 @@ function renderColokBebas(used){
     </div>`;
   container.appendChild(col);
 
-  // level 1/2/3 = 1/2/3 digit pertama dari urutan greedy; level 4 = jumlah digit MINIMAL
-  // yang dibutuhkan supaya peluang gabungan tidak kurang dari 90% (bisa >4 digit kalau perlu)
-  const level = n => steps[Math.min(n, steps.length) - 1] || steps[steps.length - 1];
-  const level1 = level(1);
-  const level2 = level(2);
-  const level3 = level(3);
-  const level90 = steps.find(s => s.pct >= 90) || steps[steps.length - 1];
-
-  cbTopValues = {
-    top1: level1.digits.join(''),
-    top2: level2.digits.join(''),
-    top3: level3.digits.join(''),
-    top90: level90.digits.join('')
-  };
-
-  const stepLines = steps.slice(0, Math.max(steps.indexOf(level90) + 1, 3)).map((s, i) => {
-    const addedDigit = s.digits[s.digits.length - 1];
-    return i === 0
-      ? `Digit <b style="color:var(--ink);">${addedDigit}</b> sendiri → peluang muncul <b style="color:var(--teal);">${s.pct.toFixed(0)}%</b>`
-      : `+ digit <b style="color:var(--ink);">${addedDigit}</b> → jadi <b style="color:var(--amber);">${s.digits.join(',')}</b> mencakup <b style="color:var(--teal);">${s.pct.toFixed(0)}%</b>`;
-  });
+  const stepLines = [
+    `Peluang Terbaik 1: digit <b style="color:var(--ink);">${top1.d}</b> (peluang individu terbesar) → <b style="color:var(--teal);">${pct1.toFixed(1)}%</b>`,
+    `Peluang Terbaik 2: peluang terbesar no.1 + no.2 → digit <b style="color:var(--amber);">${top1.d},${top2.d}</b> = <b style="color:var(--teal);">${pct2.toFixed(1)}%</b>`,
+    `Peluang Terbaik 3: peluang terbesar no.1 + no.2 + no.3 → digit <b style="color:var(--amber);">${top1.d},${top2.d},${top3.d}</b> = <b style="color:var(--teal);">${pct3.toFixed(1)}%</b>`
+  ];
 
   document.getElementById('simpulanCB').innerHTML =
     `<div style="display:flex; flex-direction:column; gap:5px; font-family:var(--mono); font-size:12.5px; margin-bottom:10px;">${stepLines.map(l => `<div>${l}</div>`).join('')}</div>`
-    + `Untuk mencapai peluang minimal 90%, dibutuhkan <b style="color:var(--ink);">${level90.digits.length} digit</b>: <b style="color:var(--amber);">${level90.digits.join(',')}</b> (${level90.pct.toFixed(1)}%). `
-    + `Catatan: filter Colok Bebas mewajibkan SEMUA digit yang dimasukkan muncul bersamaan dalam 1 angka — makin banyak digit yang dipasang sekaligus di kolom filter, makin sedikit kombinasi yang lolos, meski peluang "salah satu digit ini muncul" makin tinggi.`;
+    + `Tombol Peluang Terbaik 1/2/3 di bawah akan langsung mengisi digit terpilih ke kolom <b style="color:var(--ink);">Angka Ikut</b> pada Filter Pangkas Kombinasi. `
+    + `Catatan: filter Angka Ikut meloloskan angka yang mengandung SALAH SATU dari digit yang dimasukkan — makin banyak digit dipasang, makin besar peluang cocok, tapi jumlah kombinasi yang lolos juga makin banyak.`;
 }
 
 document.getElementById('pakaiJumlahBtn').addEventListener('click', () => {
@@ -638,22 +618,17 @@ document.getElementById('pakaiSelisihBtn').addEventListener('click', () => {
 });
 document.getElementById('pakaiCB1Btn').addEventListener('click', () => {
   if(!cbTopValues.top1) return;
-  document.getElementById('filterCB').value = cbTopValues.top1;
+  document.getElementById('filterAI').value = cbTopValues.top1;
   if(lastTop8Pools.length) applyFilters();
 });
 document.getElementById('pakaiCB2Btn').addEventListener('click', () => {
   if(!cbTopValues.top2) return;
-  document.getElementById('filterCB').value = cbTopValues.top2;
+  document.getElementById('filterAI').value = cbTopValues.top2;
   if(lastTop8Pools.length) applyFilters();
 });
 document.getElementById('pakaiCB3Btn').addEventListener('click', () => {
   if(!cbTopValues.top3) return;
-  document.getElementById('filterCB').value = cbTopValues.top3;
-  if(lastTop8Pools.length) applyFilters();
-});
-document.getElementById('pakaiCB4Btn').addEventListener('click', () => {
-  if(!cbTopValues.top90) return;
-  document.getElementById('filterCB').value = cbTopValues.top90;
+  document.getElementById('filterAI').value = cbTopValues.top3;
   if(lastTop8Pools.length) applyFilters();
 });
 
@@ -885,9 +860,26 @@ document.getElementById('bulkCopyBtn').addEventListener('click', () => {
 
 document.getElementById('analyzeBtn').addEventListener('click', analyze);
 
-// ---------- Simpan / Muat / Hapus data historis ----------
+// ---------- Simpan / Muat / Hapus data historis (Firebase Realtime Database) ----------
 const SAVE_KEY = 'analisaFrekuensi_savedData';
-let savedEntriesCache = null; // sumber utama untuk render — tetap berfungsi walau localStorage diblokir
+let savedEntriesCache = []; // sumber utama untuk render — diisi dari Firebase, fallback ke localStorage
+let firebaseReady = false;
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB1yunsgfeJ-cyjx24hb0mG9nnVDOHfzl4",
+  authDomain: "analisa-frekuensi.firebaseapp.com",
+  databaseURL: "https://analisa-frekuensi-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "analisa-frekuensi",
+  storageBucket: "analisa-frekuensi.firebasestorage.app",
+  messagingSenderId: "44538798162",
+  appId: "1:44538798162:web:c879bc4b44bc98371c3f8b"
+};
+
+let db = null;
+try{
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.database();
+}catch(e){ console.error('Firebase gagal diinisialisasi:', e); }
 
 function loadSavedEntriesFromStorage(){
   try{
@@ -896,14 +888,24 @@ function loadSavedEntriesFromStorage(){
   }catch(e){ return []; }
 }
 
+function cacheToLocalStorage(list){
+  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(list)); }catch(e){ /* localStorage diblokir — tetap jalan dari cache memori */ }
+}
+
 function getSavedEntries(){
-  if(savedEntriesCache === null){ savedEntriesCache = loadSavedEntriesFromStorage(); }
   return savedEntriesCache;
 }
 
 function setSavedEntries(list){
   savedEntriesCache = list;
-  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(list)); }catch(e){ /* localStorage diblokir — tetap jalan dari cache memori */ }
+  cacheToLocalStorage(list);
+  if(db){
+    db.ref('savedData').set(list).catch(e => {
+      console.error('Gagal sync ke cloud:', e);
+      document.getElementById('saveFeedback').textContent = 'Tersimpan lokal, tapi gagal sync ke cloud (cek koneksi internet).';
+      document.getElementById('saveFeedback').style.color = 'var(--rose)';
+    });
+  }
 }
 
 function renderSavedList(){
@@ -945,7 +947,7 @@ function renderSavedList(){
         return;
       }
       const idx = parseInt(btn.dataset.idx, 10);
-      const entries = getSavedEntries();
+      const entries = getSavedEntries().slice();
       entries.splice(idx, 1);
       setSavedEntries(entries);
       renderSavedList();
@@ -961,7 +963,7 @@ document.getElementById('saveDataBtn').addEventListener('click', () => {
     feedback.style.color = 'var(--rose)';
     return;
   }
-  const entries = getSavedEntries();
+  const entries = getSavedEntries().slice();
   const nameInput = document.getElementById('saveNameInput');
   const trimmed = nameInput.value.trim() || `Data ${entries.length + 1}`;
   const savedAt = new Date().toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -971,12 +973,39 @@ document.getElementById('saveDataBtn').addEventListener('click', () => {
   setSavedEntries(entries);
   renderSavedList();
   feedback.style.color = 'var(--teal)';
-  feedback.textContent = existingIdx >= 0 ? `Tersimpan (memperbarui "${trimmed}") ✓` : `Tersimpan sebagai "${trimmed}" ✓`;
+  feedback.textContent = existingIdx >= 0 ? `Tersimpan (memperbarui "${trimmed}") ✓ — sync ke cloud...` : `Tersimpan sebagai "${trimmed}" ✓ — sync ke cloud...`;
   nameInput.value = trimmed;
   setTimeout(() => { feedback.textContent = ''; }, 3000);
 });
 
-renderSavedList();
+// Muat data awal dari cloud, lalu dengarkan perubahan real-time (sync otomatis antar perangkat)
+if(db){
+  db.ref('savedData').once('value')
+    .then(snap => {
+      savedEntriesCache = snap.exists() ? snap.val() : loadSavedEntriesFromStorage();
+      firebaseReady = true;
+      renderSavedList();
+      const statusEl = document.getElementById('cloudStatus');
+      if(statusEl){ statusEl.textContent = '· ☁️ tersinkron'; statusEl.style.color = 'var(--teal)'; }
+    })
+    .catch(e => {
+      console.error('Gagal ambil data cloud, pakai data lokal:', e);
+      savedEntriesCache = loadSavedEntriesFromStorage();
+      renderSavedList();
+      const statusEl = document.getElementById('cloudStatus');
+      if(statusEl){ statusEl.textContent = '· ⚠️ gagal konek cloud, pakai data lokal'; statusEl.style.color = 'var(--rose)'; }
+    });
+
+  db.ref('savedData').on('value', snap => {
+    if(!firebaseReady) return; // hindari trigger ganda saat load pertama
+    savedEntriesCache = snap.exists() ? snap.val() : [];
+    cacheToLocalStorage(savedEntriesCache);
+    renderSavedList();
+  });
+} else {
+  savedEntriesCache = loadSavedEntriesFromStorage();
+  renderSavedList();
+}
 
 // jalankan sekali dengan data contoh saat pertama dibuka
 window.addEventListener('DOMContentLoaded', () => {
