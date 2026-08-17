@@ -145,6 +145,43 @@
   .warn b{color:var(--rose);}
 
   footer{text-align:center; color:var(--ink-dim); font-size:11px; margin-top:20px;}
+
+  .modeblock{margin-bottom:10px;}
+  .modehead{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 10px;
+    font-size:11.5px; font-weight:700; color:var(--amber); text-transform:uppercase; letter-spacing:.06em;
+    margin-bottom:6px;
+  }
+  .modehead .modemini{font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); text-transform:none; font-weight:400; letter-spacing:0;}
+  table.modetable{width:100%; border-collapse:collapse; font-size:12.5px;}
+  table.modetable th, table.modetable td{
+    padding:6px 6px; text-align:left; border-bottom:1px solid var(--line);
+  }
+  table.modetable th{font-size:10px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em; font-weight:600;}
+  table.modetable td{font-family:var(--mono); color:var(--ink);}
+  table.modetable tr:last-child td{border-bottom:none;}
+
+  .kes8row{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
+    padding:8px 10px; margin-bottom:6px; font-family:var(--mono);
+  }
+  .kes8row .tag{font-family:var(--sans); font-size:10px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em; min-width:78px;}
+  .kes8row .angka{font-size:16px; font-weight:700; color:var(--amber); letter-spacing:.06em; flex:1; text-align:center;}
+  .kes8row .pct{font-size:12px; color:var(--teal); min-width:46px; text-align:right;}
+
+  .toprow{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
+    padding:8px 10px; margin-bottom:6px; font-family:var(--mono); font-size:12.5px;
+  }
+  .toprow .poslbl{font-family:var(--sans); font-weight:700; color:var(--ink); font-size:12px; margin-bottom:4px; text-transform:uppercase; letter-spacing:.05em;}
+  .toprow .tline{display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; margin-top:2px;}
+  .toprow .tline b{color:var(--ink-dim); font-family:var(--sans); font-size:10px; text-transform:uppercase; letter-spacing:.05em; min-width:44px; display:inline-block;}
+  .toprow .tline label{display:inline-flex; align-items:center; gap:4px; cursor:pointer; user-select:none;}
+  .toprow .tline input[type="checkbox"]{width:13px; height:13px; accent-color:var(--teal); cursor:pointer; margin:0;}
+  .toprow .tline.t1 span{color:var(--teal); font-weight:700;}
+  .toprow .tline.t2 span{color:var(--amber); font-weight:700;}
+  .toprow .tline.t3 span{color:var(--rose); font-weight:700;}
 </style>
 </head>
 <body>
@@ -157,20 +194,7 @@
 
   <div class="card">
     <h2>Data Historis</h2>
-    <textarea id="dataInput" placeholder="6714
-2375
-7137
-5102
-0715
-3052
-1596
-8813
-6431
-5131
-9662
-0647
-9418
-4087"></textarea>
+    <textarea id="dataInput" placeholder="Tempel data historis di sini, satu angka per baris..."></textarea>
     <p class="hint">Boleh dipisah baris baru, spasi, koma, atau tanda *. Panjang digit campur akan otomatis dikelompokkan per panjang yang paling banyak muncul.</p>
     <div class="row">
       <button class="btn primary" id="analyzeBtn">Hitung Frekuensi</button>
@@ -187,26 +211,41 @@
   </div>
 
   <div class="card">
-    <h2>Data Tersimpan</h2>
-    <p class="hint" style="margin-top:0;">Simpan beberapa kumpulan data historis dengan nama berbeda, lalu muat atau hapus kapan saja. Tersimpan di perangkatmu sendiri (browser), tidak dikirim ke mana pun.</p>
+    <h2>Data Tersimpan <span id="cloudStatus" style="text-transform:none; color:var(--ink-dim); font-weight:400;">· menghubungkan ke cloud...</span></h2>
+    <p class="hint" style="margin-top:0;">Simpan beberapa kumpulan data historis dengan nama berbeda, lalu muat atau hapus kapan saja. Otomatis tersinkron ke semua perangkatmu lewat cloud.</p>
     <div id="savedList"></div>
   </div>
 
   <div class="card" id="resultCard" style="display:none;">
     <h2>Perilaku Perubahan per Posisi</h2>
-    <p class="hint" style="margin-top:0;">Peluang digit berikutnya dihitung dari pola naik/turun/tetap antar data, diterapkan ke digit data terbaru.</p>
+    <p class="hint" style="margin-top:0;">Empat cara baca: NORMAL (angka apa adanya), MISTIK LAMA, MISTIK BARU, dan INDEX (angka dikonversi dulu pakai tabel kode, baru pola naik/turun/tetapnya dihitung).</p>
     <div id="posCols"></div>
     <textarea id="posCopyArea" readonly style="margin-top:10px; min-height:auto; height:44px; font-size:12px;"></textarea>
     <div class="row" style="margin-top:6px;">
       <button class="btn" id="posCopyBtn">Salin Hasil Analisis</button>
     </div>
     <div class="kandidat" style="margin-top:14px;">
-      <div class="lbl">Kesimpulan dari data terakhir</div>
-      <p class="hint" id="simpulanTrend" style="margin:0 0 8px;"></p>
-      <div class="lbl">Kandidat utama</div>
-      <div class="val" id="simpulanUtama">–</div>
-      <div class="lbl" style="margin-top:8px;">Kandidat alternatif</div>
-      <div class="val" id="simpulanAlt" style="color:var(--teal);">–</div>
+      <div class="lbl">Kesimpulan · 8 Digit Terbaik per Posisi (A=Ribuan, C=Ratusan, K=Puluhan, E=Satuan)</div>
+      <p class="hint" style="margin:0 0 8px;">Satu baris per mode — tiap posisi berisi 8 digit dengan persentase tertinggi.</p>
+      <div id="kesimpulan8"></div>
+      <div class="lbl" style="margin-top:12px;">TOP · Irisan Mode per Posisi</div>
+      <p class="hint" style="margin:0 0 8px;">Pilih mode yang mau diikutkan dalam irisan. TOP 1 = ada di semua mode terpilih, TOP 2 = ada di (jumlah mode terpilih − 1), TOP 3 = sisanya.</p>
+      <div class="row" style="margin-top:0;">
+        <label class="chk"><input type="checkbox" id="modeChkNormal" checked> NORMAL</label>
+        <label class="chk"><input type="checkbox" id="modeChkMistikLama" checked> MISTIK LAMA</label>
+        <label class="chk"><input type="checkbox" id="modeChkMistikBaru" checked> MISTIK BARU</label>
+        <label class="chk"><input type="checkbox" id="modeChkIndex" checked> INDEX</label>
+      </div>
+      <div id="topGabungan" style="margin-top:10px;"></div>
+      <div class="lbl" style="margin-top:10px;">Pakai ke Generator</div>
+      <div class="row" style="margin-top:6px;">
+        <button class="btn" id="pakaiNormalBtn">NORMAL</button>
+        <button class="btn" id="pakaiMistikLamaBtn">MISTIK LAMA</button>
+        <button class="btn" id="pakaiMistikBaruBtn">MISTIK BARU</button>
+        <button class="btn" id="pakaiIndexBtn">INDEX</button>
+        <button class="btn primary" id="pakaiTopBtn">TOP</button>
+      </div>
+      <p class="hint" style="margin:6px 0 0;">Menekan salah satu tombol akan mengisi ulang Generator &amp; Kombinasi Acak di bawah pakai 8 digit teratas per posisi dari mode tersebut. Tombol <b>TOP</b> memakai digit dari Top 1/2/3 yang dicentang di atas untuk tiap posisi (A/C/K/E).</p>
     </div>
   </div>
 
@@ -223,17 +262,16 @@
       </div>
     </div>
 
-    <h2 style="margin-top:18px;">Analisis Colok Bebas</h2>
+    <h2 style="margin-top:18px;">ANALISIS ANGKA IKUT 4D</h2>
     <p class="hint" style="margin-top:0;">Persentase dihitung dari berapa banyak data historis yang mengandung digit tersebut di posisi mana pun (bukan sekadar frekuensi mentah), jadi digit kembar dalam satu angka tidak menggelembungkan hasil.</p>
     <div id="cbCol"></div>
     <div class="kandidat" style="margin-top:14px;">
-      <div class="lbl">Kesimpulan Colok Bebas</div>
+      <div class="lbl">Kesimpulan Angka Ikut</div>
       <p class="hint" id="simpulanCB" style="margin:0 0 10px;"></p>
       <div class="row" style="margin-top:0;">
         <button class="btn" id="pakaiCB1Btn">↳ Peluang Terbaik 1</button>
         <button class="btn" id="pakaiCB2Btn">↳ Peluang Terbaik 2</button>
         <button class="btn" id="pakaiCB3Btn">↳ Peluang Terbaik 3</button>
-        <button class="btn" id="pakaiCB4Btn">↳ Peluang Terbaik 4 (≥90%)</button>
       </div>
     </div>
   </div>
@@ -323,12 +361,202 @@
     </div>
   </div>
 
-  <footer>Semua proses berjalan di perangkatmu — tidak ada data yang dikirim keluar.</footer>
+  <footer>Perhitungan analisis berjalan di perangkatmu. Data yang kamu simpan (nama &amp; data historis) disinkronkan ke database cloud (Firebase) agar bisa diakses dari perangkat lain.</footer>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 let lastAnalysis = null; // { targetLen, posNames, transitionWeights, lastDigits, globalStats }
 let lastHistoryNumbers = []; // data historis yang dipakai untuk filter "buang yang sudah keluar"
+let lastModeResults = null; // { normal, mistikLama, mistikBaru, index } — hasil computeModeAnalysis tiap mode
+let lastPosLabels = null; // ['A','C','K','E'] dst — dipakai ulang saat checkbox mode TOP berubah
+let topTierSelection = {}; // key `${posIdx}_${tier}` -> boolean, status checkbox Top 1/2/3 per posisi
+
+// ---------- Tabel kode Mistik Lama / Mistik Baru / Index ----------
+const DIGIT_MAPS = {
+  normal: null,
+  mistikLama: {0:1,1:0,2:5,3:8,4:7,5:2,6:9,7:4,8:3,9:6},
+  mistikBaru: {0:8,1:7,2:6,3:9,4:5,5:4,6:2,7:1,8:0,9:3},
+  index:      {0:5,1:6,2:7,3:8,4:9,5:0,6:1,7:2,8:3,9:4}
+};
+const MODE_LABELS = { normal:'NORMAL', mistikLama:'MISTIK LAMA', mistikBaru:'MISTIK BARU', index:'INDEX' };
+const MODE_ORDER = ['normal','mistikLama','mistikBaru','index'];
+
+function applyDigitMap(numStr, map){
+  if(!map) return numStr;
+  return numStr.split('').map(ch => String(map[parseInt(ch,10)])).join('');
+}
+
+// Hitung perilaku naik/turun/tetap + peluang digit berikutnya untuk SATU mode (NORMAL/MISTIK LAMA/MISTIK BARU/INDEX)
+function computeModeAnalysis(used, targetLen, map){
+  const mapped = used.map(n => applyDigitMap(n, map));
+  const chrono = mapped.slice().reverse(); // terlama -> terbaru
+
+  const lastDigits = [];
+  for(let p = 0; p < targetLen; p++) lastDigits.push(parseInt(mapped[0][p], 10));
+
+  const globalDeltaCounts = new Array(10).fill(0);
+  let globalNaik = 0, globalTurun = 0, globalTetap = 0;
+  for(let i = 0; i < chrono.length - 1; i++){
+    for(let p = 0; p < targetLen; p++){
+      const prevD = parseInt(chrono[i][p], 10);
+      const nextD = parseInt(chrono[i+1][p], 10);
+      const modDelta = (nextD - prevD + 10) % 10;
+      globalDeltaCounts[modDelta]++;
+      const raw = nextD - prevD;
+      if(raw > 0) globalNaik++; else if(raw < 0) globalTurun++; else globalTetap++;
+    }
+  }
+  const totalGlobalTrans = Math.max((chrono.length - 1) * targetLen, 1);
+  const globalStats = {
+    naikPct: globalNaik / totalGlobalTrans * 100,
+    turunPct: globalTurun / totalGlobalTrans * 100,
+    tetapPct: globalTetap / totalGlobalTrans * 100
+  };
+
+  const transitionWeights = [];
+  for(let p = 0; p < targetLen; p++){
+    const weights = {};
+    for(let d = 0; d <= 9; d++){
+      const neededDelta = (d - lastDigits[p] + 10) % 10;
+      weights[String(d)] = globalDeltaCounts[neededDelta];
+    }
+    transitionWeights.push(weights);
+  }
+
+  const rankedPerPos = transitionWeights.map(weights => {
+    const totalW = Object.values(weights).reduce((a,b) => a+b, 0) || 1;
+    return Object.entries(weights)
+      .map(([d, c]) => ({ d, c, pct: (c/totalW*100) }))
+      .sort((a,b) => b.c - a.c);
+  });
+
+  const kandidatUtama = rankedPerPos.map(r => r[0].d).join('');
+  const kandidatAlt = rankedPerPos.map(r => (r[1] || r[0]).d).join('');
+  const pctUtama = rankedPerPos.reduce((a, r) => a + r[0].pct, 0) / rankedPerPos.length;
+  const pctAlt = rankedPerPos.reduce((a, r) => a + (r[1] || r[0]).pct, 0) / rankedPerPos.length;
+  const top8Pools = rankedPerPos.map(r => r.slice(0, 8).map(x => x.d));
+
+  return { lastDigits, transitionWeights, globalStats, rankedPerPos, kandidatUtama, kandidatAlt, pctUtama, pctAlt, top8Pools };
+}
+
+// Hitung irisan mode TERPILIH per posisi: TOP1 = ada di semua mode terpilih, TOP2 = ada di (N-1) mode, TOP3 = sisanya
+function computeTopGabungan(modeResults, posIdx, selectedModes){
+  const N = selectedModes.length;
+  const membership = {};
+  for(let d = 0; d <= 9; d++){
+    let count = 0, pctSum = 0;
+    selectedModes.forEach(key => {
+      const pool = modeResults[key].top8Pools[posIdx];
+      if(pool.includes(String(d))) count++;
+      const entry = modeResults[key].rankedPerPos[posIdx].find(r => r.d === String(d));
+      pctSum += entry ? entry.pct : 0;
+    });
+    membership[d] = { count, pctSum };
+  }
+  const digits = Array.from({length: 10}, (_, d) => d);
+  const byPctDesc = (a, b) => membership[b].pctSum - membership[a].pctSum;
+  const top1 = digits.filter(d => membership[d].count === N).sort(byPctDesc);
+  const top2 = digits.filter(d => membership[d].count === N - 1).sort(byPctDesc);
+  const top3 = digits.filter(d => membership[d].count <= N - 2).sort(byPctDesc);
+  return { top1, top2, top3 };
+}
+
+function getSelectedModes(){
+  const map = { normal: 'modeChkNormal', mistikLama: 'modeChkMistikLama', mistikBaru: 'modeChkMistikBaru', index: 'modeChkIndex' };
+  return MODE_ORDER.filter(key => document.getElementById(map[key]).checked);
+}
+
+function renderTopGabungan(){
+  if(!lastModeResults || !lastPosLabels) return;
+  const selectedModes = getSelectedModes();
+  const box = document.getElementById('topGabungan');
+  if(selectedModes.length === 0){
+    box.innerHTML = '<p class="emptynote">Pilih minimal 1 mode untuk melihat irisan TOP.</p>';
+    return;
+  }
+  box.innerHTML = lastPosLabels.map((label, idx) => {
+    const { top1, top2, top3 } = computeTopGabungan(lastModeResults, idx, selectedModes);
+    const tierLine = (tier, tierLabel, arr) => {
+      const key = `${idx}_${tier}`;
+      if(!(key in topTierSelection)) topTierSelection[key] = (tier === 1); // default: Top 1 aktif
+      const checked = topTierSelection[key] ? 'checked' : '';
+      return `<div class="tline t${tier}">
+          <label><input type="checkbox" class="topTierChk" data-pos="${idx}" data-tier="${tier}" ${checked}><b>${tierLabel}</b></label>
+          <span>${arr.join('') || '–'}</span>
+        </div>`;
+    };
+    return `<div class="toprow">
+        <div class="poslbl">${label}</div>
+        ${tierLine(1, 'Top 1', top1)}
+        ${tierLine(2, 'Top 2', top2)}
+        ${tierLine(3, 'Top 3', top3)}
+      </div>`;
+  }).join('');
+
+  box.querySelectorAll('.topTierChk').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const key = `${cb.dataset.pos}_${cb.dataset.tier}`;
+      topTierSelection[key] = cb.checked;
+    });
+  });
+}
+['modeChkNormal','modeChkMistikLama','modeChkMistikBaru','modeChkIndex'].forEach(id => {
+  document.getElementById(id).addEventListener('change', renderTopGabungan);
+});
+
+// Isi Generator & Kombinasi Acak pakai digit dari Top 1/2/3 yang dicentang di tiap posisi (A/C/K/E)
+function useTopInGenerator(){
+  if(!lastModeResults || !lastPosLabels) return;
+  const selectedModes = getSelectedModes();
+  if(selectedModes.length === 0){ alert('Pilih minimal 1 mode (NORMAL/MISTIK LAMA/MISTIK BARU/INDEX) dulu di bagian TOP.'); return; }
+
+  const pools = lastPosLabels.map((label, idx) => {
+    const { top1, top2, top3 } = computeTopGabungan(lastModeResults, idx, selectedModes);
+    const picked = [];
+    if(topTierSelection[`${idx}_1`]) picked.push(...top1);
+    if(topTierSelection[`${idx}_2`]) picked.push(...top2);
+    if(topTierSelection[`${idx}_3`]) picked.push(...top3);
+    return picked.map(String);
+  });
+
+  if(pools.some(p => p.length === 0)){
+    alert('Tiap posisi (A/C/K/E) harus punya minimal satu Top yang dicentang.');
+    return;
+  }
+
+  lastTop8Pools = pools;
+  document.getElementById('bulkOut').value = pools.map(p => p.join('')).join(' x ');
+  generateCombineOutput();
+  if(document.getElementById('filterCard').style.display === 'block') resetFilters();
+}
+document.getElementById('pakaiTopBtn').addEventListener('click', useTopInGenerator);
+
+function renderModeTable(modeKey, result, posLabels){
+  const { lastDigits, rankedPerPos, globalStats } = result;
+  const rows = rankedPerPos.map((ranked, idx) => {
+    const top8 = ranked.filter(r => r.pct > 0).slice(0, 8).map(r => r.d).join('');
+    const topPct = ranked[0].pct;
+    return `<tr>
+      <td>${posLabels[idx] || ('P' + (idx+1))}</td>
+      <td>${lastDigits[idx]}</td>
+      <td style="letter-spacing:.05em;"><b style="color:var(--amber);">${top8}</b></td>
+      <td>${topPct.toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+  return `<div class="modeblock">
+    <div class="modehead">
+      <span>${MODE_LABELS[modeKey]}</span>
+      <span class="modemini">Naik ${globalStats.naikPct.toFixed(0)}% · Tetap ${globalStats.tetapPct.toFixed(0)}% · Turun ${globalStats.turunPct.toFixed(0)}%</span>
+    </div>
+    <table class="modetable">
+      <thead><tr><th>Pos</th><th>Terakhir</th><th>8 Digit Terbaik</th><th>%</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
 
 function parseData(raw){
   const tokens = raw.split(/[\s,\*]+/).map(s => s.replace(/[^0-9]/g,'')).filter(s => s.length > 0);
@@ -361,129 +589,76 @@ function analyze(){
     document.getElementById('bulkCard').style.display = 'none';
     document.getElementById('filterCard').style.display = 'none';
     lastAnalysis = null;
+    lastModeResults = null;
+    lastPosLabels = null;
+    topTierSelection = {};
     lastTop8Pools = [];
     lastHistoryNumbers = [];
     jsTopValues = { jumlah: [], selisih: [] };
-    cbTopValues = { top1: null, top2: null, top3: null, top90: null };
+    cbTopValues = { top1: null, top2: null, top3: null };
     return;
   }
 
-  // hitung PERILAKU PERUBAHAN dari SELURUH DATA (digabung, bukan per posisi)
-  // asumsi: data pertama di input = data terbaru, data terakhir = data terlama
-  const chrono = used.slice().reverse(); // urut dari terlama -> terbaru
-  const lastDigits = []; // digit posisi p pada data TERBARU (used[0])
-  for(let p = 0; p < targetLen; p++){
-    lastDigits.push(parseInt(used[0][p], 10));
-  }
-
-  // kumpulkan SEMUA transisi digit (dari semua posisi, semua pasangan data berurutan) jadi satu acuan
-  // contoh: 2375 -> 6714, posisi ke-1: 2 -> 6 dianggap "naik 4 tingkat", dst untuk tiap posisi & tiap pasangan data
-  const globalDeltaCounts = new Array(10).fill(0);
-  let globalNaik = 0, globalTurun = 0, globalTetap = 0;
-  for(let i = 0; i < chrono.length - 1; i++){
-    for(let p = 0; p < targetLen; p++){
-      const prevD = parseInt(chrono[i][p], 10);
-      const nextD = parseInt(chrono[i+1][p], 10);
-      const modDelta = (nextD - prevD + 10) % 10;
-      globalDeltaCounts[modDelta]++;
-      const raw = nextD - prevD;
-      if(raw > 0) globalNaik++; else if(raw < 0) globalTurun++; else globalTetap++;
-    }
-  }
-  const totalGlobalTrans = Math.max((chrono.length - 1) * targetLen, 1);
-  const globalStats = {
-    naikPct: globalNaik / totalGlobalTrans * 100,
-    turunPct: globalTurun / totalGlobalTrans * 100,
-    tetapPct: globalTetap / totalGlobalTrans * 100
-  };
-
-  // bobot peluang digit berikutnya = pola delta gabungan (global), diterapkan ke digit data terbaru tiap posisi
-  const transitionWeights = [];
-  for(let p = 0; p < targetLen; p++){
-    const weights = {};
-    for(let d = 0; d <= 9; d++){
-      const neededDelta = (d - lastDigits[p] + 10) % 10;
-      weights[String(d)] = globalDeltaCounts[neededDelta];
-    }
-    transitionWeights.push(weights);
-  }
-
-  const posNames = targetLen === 4
-    ? ['Ribuan','Ratusan','Puluhan','Satuan']
+  const posLabels = targetLen === 4
+    ? ['A','C','K','E']
     : targetLen === 3
-      ? ['Ratusan','Puluhan','Satuan']
-      : ['Puluhan','Satuan'];
+      ? ['C','K','E']
+      : ['K','E'];
+
+  // ---------- Hitung 4 mode: NORMAL, MISTIK LAMA, MISTIK BARU, INDEX ----------
+  const modeResults = {};
+  MODE_ORDER.forEach(key => { modeResults[key] = computeModeAnalysis(used, targetLen, DIGIT_MAPS[key]); });
+  lastModeResults = modeResults;
 
   const container = document.getElementById('posCols');
-  container.innerHTML = `<div class="globalstats">
-    <div class="gs naik"><div class="v">${globalStats.naikPct.toFixed(0)}%</div><div class="l">Naik</div></div>
-    <div class="gs tetap"><div class="v">${globalStats.tetapPct.toFixed(0)}%</div><div class="l">Tetap</div></div>
-    <div class="gs turun"><div class="v">${globalStats.turunPct.toFixed(0)}%</div><div class="l">Turun</div></div>
-  </div>`;
-  const kandidatParts = [];
+  container.innerHTML = MODE_ORDER.map(key => renderModeTable(key, modeResults[key], posLabels)).join('<div style="height:2px;background:var(--line);margin:10px 0;"></div>');
 
-  transitionWeights.forEach((weights, idx) => {
-    const totalW = Object.values(weights).reduce((a,b) => a+b, 0) || 1;
-    const ranked = Object.entries(weights)
-      .map(([d, c]) => ({ d, c, pct: (c/totalW*100) }))
-      .sort((a,b) => b.c - a.c);
-
-    const maxPct = ranked[0].pct;
-    const col = document.createElement('div');
-    col.className = 'poscol';
-    col.style.marginBottom = '10px';
-    const title = posNames[idx] || ('Posisi ' + (idx+1));
-    col.innerHTML = `<div class="poscol-head">
-        <span class="name">${title}</span>
-        <span class="lastbadge">data terakhir <b>${lastDigits[idx]}</b></span>
-      </div>
-      <div style="display:flex; flex-wrap:wrap; gap:6px 8px;">
-        ${ranked.filter(r => r.pct > 0).map(r => `<span class="topchip ${r.pct === maxPct ? 'top' : ''}"><b>${r.d}</b>${r.pct.toFixed(1)}%</span>`).join('')}
-      </div>`;
-    container.appendChild(col);
-
-    const topDigits = ranked.filter(r => r.pct === maxPct).map(r => r.d);
-    const nextDigits = ranked.filter(r => r.pct !== maxPct && r.pct > 0).slice(0, 4 - topDigits.length >= 0 ? 4 - topDigits.length : 0).map(r => r.d);
-    kandidatParts.push(`${title}: ${topDigits.concat(nextDigits).join('')}`);
-  });
-
-  document.getElementById('posCopyArea').value = kandidatParts.join(' | ');
+  document.getElementById('posCopyArea').value = MODE_ORDER
+    .map(key => `${MODE_LABELS[key]}: ${modeResults[key].kandidatUtama}`)
+    .join(' | ');
   document.getElementById('resultCard').style.display = 'block';
 
-  // ---------- Kesimpulan dari data terakhir ----------
-  const rankedPerPos = transitionWeights.map(weights => {
-    const totalW = Object.values(weights).reduce((a,b) => a+b, 0) || 1;
-    return Object.entries(weights)
-      .map(([d, c]) => ({ d, c, pct: (c/totalW*100) }))
-      .sort((a,b) => b.c - a.c);
-  });
-  const kandidatUtama = rankedPerPos.map(r => r[0].d).join('');
-  const kandidatAlt = rankedPerPos.map(r => (r[1] || r[0]).d).join('');
+  // ---------- Kesimpulan: per mode, 8 digit terbaik tiap posisi digabung "A xxxx x C xxxx x K xxxx x E xxxx" ----------
+  document.getElementById('kesimpulan8').innerHTML = MODE_ORDER.map(key => {
+    const r = modeResults[key];
+    const line = r.top8Pools.map((pool, idx) => `${posLabels[idx]} ${pool.join('')}`).join(' x ');
+    return `<div class="kes8row" style="flex-direction:column; align-items:flex-start; gap:4px;">
+        <span class="tag">${MODE_LABELS[key]}</span>
+        <span class="angka" style="text-align:left; font-size:13px; letter-spacing:.02em;">${line}</span>
+      </div>`;
+  }).join('');
 
-  let dominan = 'netral';
-  if(Math.abs(globalStats.naikPct - globalStats.turunPct) >= 5){
-    dominan = globalStats.naikPct > globalStats.turunPct ? 'naik' : 'turun';
-  }
-
-  document.getElementById('simpulanTrend').textContent =
-    `Referensi data terakhir: ${used[0]}. Perilaku keseluruhan data (semua posisi digabung): Naik ${globalStats.naikPct.toFixed(1)}% · Tetap ${globalStats.tetapPct.toFixed(1)}% · Turun ${globalStats.turunPct.toFixed(1)}% — dominan ${dominan}.`;
-  document.getElementById('simpulanUtama').textContent = kandidatUtama;
-  document.getElementById('simpulanAlt').textContent = kandidatAlt;
+  lastPosLabels = posLabels;
+  topTierSelection = {};
+  renderTopGabungan();
 
   renderJumlahSelisih(used);
   renderColokBebas(used);
 
-  lastAnalysis = { targetLen, posNames, transitionWeights, lastDigits, globalStats };
+  lastAnalysis = { targetLen, posLabels, transitionWeights: modeResults.normal.transitionWeights, lastDigits: modeResults.normal.lastDigits, globalStats: modeResults.normal.globalStats };
   lastHistoryNumbers = used;
 
   document.getElementById('bulkCard').style.display = 'block';
-  renderTop8Generator();
-  generateCombineOutput();
+  useModeInGenerator('normal');
 
   document.getElementById('filterCard').style.display = 'block';
   renderTwinMurniCheckboxes(targetLen);
   resetFilters();
 }
+
+// Isi Generator & Kombinasi Acak pakai top-8 pool per posisi dari mode terpilih (NORMAL/MISTIK LAMA/MISTIK BARU/INDEX)
+function useModeInGenerator(modeKey){
+  if(!lastModeResults) return;
+  const r = lastModeResults[modeKey];
+  lastTop8Pools = r.top8Pools;
+  document.getElementById('bulkOut').value = r.top8Pools.map(p => p.join('')).join(' x ');
+  generateCombineOutput();
+  if(document.getElementById('filterCard').style.display === 'block') resetFilters();
+}
+document.getElementById('pakaiNormalBtn').addEventListener('click', () => useModeInGenerator('normal'));
+document.getElementById('pakaiMistikLamaBtn').addEventListener('click', () => useModeInGenerator('mistikLama'));
+document.getElementById('pakaiMistikBaruBtn').addEventListener('click', () => useModeInGenerator('mistikBaru'));
+document.getElementById('pakaiIndexBtn').addEventListener('click', () => useModeInGenerator('index'));
 
 let jsTopValues = { jumlah: [], selisih: [] }; // 8 nilai jumlah & selisih paling sering keluar (utk tombol pakai-di-filter)
 
@@ -545,7 +720,7 @@ function renderJumlahSelisih(used){
   document.getElementById('jsCard').style.display = 'block';
 }
 
-let cbTopValues = { top1: null, top2: null, top3: null, top90: null }; // digit terbaik Colok Bebas per level peluang gabungan
+let cbTopValues = { top1: null, top2: null, top3: null }; // digit terbaik Angka Ikut per level Peluang Terbaik 1/2/3
 
 function renderColokBebas(used){
   // hitung berdasarkan KEBERADAAN digit di tiap angka (unik per angka), bukan frekuensi mentah,
@@ -560,28 +735,23 @@ function renderColokBebas(used){
     .map((c, d) => ({ d: String(d), c, pct: c/total*100 }))
     .sort((a,b) => b.c - a.c);
 
-  // ---------- Peluang GABUNGAN bertahap (greedy set-cover) ----------
-  // tiap langkah menambahkan 1 digit yang PALING MENAMBAH cakupan data historis
-  // (bukan sekadar digit dengan frekuensi individu tertinggi), sehingga peluang
-  // "salah satu dari digit terpilih muncul di angka tsb" naik maksimal tiap langkah.
-  const steps = [];
-  const remaining = new Set(ranked.map(r => r.d));
-  const selected = [];
-  const covered = new Array(used.length).fill(false);
-  let coveredCount = 0;
-  while(remaining.size > 0 && coveredCount < used.length){
-    let bestDigit = null, bestGain = -1;
-    remaining.forEach(d => {
-      let gain = 0;
-      used.forEach((num, idx) => { if(!covered[idx] && num.includes(d)) gain++; });
-      if(gain > bestGain){ bestGain = gain; bestDigit = d; }
-    });
-    if(bestGain <= 0) break; // sisa digit tidak menambah cakupan sama sekali
-    selected.push(bestDigit);
-    remaining.delete(bestDigit);
-    used.forEach((num, idx) => { if(!covered[idx] && num.includes(bestDigit)) { covered[idx] = true; coveredCount++; } });
-    steps.push({ digits: selected.slice(), pct: coveredCount / total * 100 });
-  }
+  // ---------- Peluang Terbaik 1/2/3 (Angka Ikut) ----------
+  // Peluang Terbaik 1 = peluang digit dengan persentase individu TERBESAR.
+  // Peluang Terbaik 2 = peluang terbesar no.1 DITAMBAH peluang terbesar no.2.
+  // Peluang Terbaik 3 = peluang terbesar no.1 + no.2 + no.3 dijumlahkan.
+  const top1 = ranked[0];
+  const top2 = ranked[1] || ranked[0];
+  const top3 = ranked[2] || top2;
+
+  const pct1 = top1.pct;
+  const pct2 = top1.pct + top2.pct;
+  const pct3 = top1.pct + top2.pct + top3.pct;
+
+  cbTopValues = {
+    top1: top1.d,
+    top2: top1.d + top2.d,
+    top3: top1.d + top2.d + top3.d
+  };
 
   const top6Set = new Set(ranked.slice(0, 6).map(r => r.d));
   const container = document.getElementById('cbCol');
@@ -590,7 +760,7 @@ function renderColokBebas(used){
   col.className = 'poscol';
   col.style.width = '100%';
   col.innerHTML = `<div class="poscol-head">
-      <span class="name">Colok Bebas</span>
+      <span class="name">Angka Ikut</span>
       <span class="lastbadge">${used.length} data</span>
     </div>
     <div style="display:flex; flex-wrap:wrap; gap:6px 8px;">
@@ -598,32 +768,16 @@ function renderColokBebas(used){
     </div>`;
   container.appendChild(col);
 
-  // level 1/2/3 = 1/2/3 digit pertama dari urutan greedy; level 4 = jumlah digit MINIMAL
-  // yang dibutuhkan supaya peluang gabungan tidak kurang dari 90% (bisa >4 digit kalau perlu)
-  const level = n => steps[Math.min(n, steps.length) - 1] || steps[steps.length - 1];
-  const level1 = level(1);
-  const level2 = level(2);
-  const level3 = level(3);
-  const level90 = steps.find(s => s.pct >= 90) || steps[steps.length - 1];
-
-  cbTopValues = {
-    top1: level1.digits.join(''),
-    top2: level2.digits.join(''),
-    top3: level3.digits.join(''),
-    top90: level90.digits.join('')
-  };
-
-  const stepLines = steps.slice(0, Math.max(steps.indexOf(level90) + 1, 3)).map((s, i) => {
-    const addedDigit = s.digits[s.digits.length - 1];
-    return i === 0
-      ? `Digit <b style="color:var(--ink);">${addedDigit}</b> sendiri → peluang muncul <b style="color:var(--teal);">${s.pct.toFixed(0)}%</b>`
-      : `+ digit <b style="color:var(--ink);">${addedDigit}</b> → jadi <b style="color:var(--amber);">${s.digits.join(',')}</b> mencakup <b style="color:var(--teal);">${s.pct.toFixed(0)}%</b>`;
-  });
+  const stepLines = [
+    `Peluang Terbaik 1: digit <b style="color:var(--ink);">${top1.d}</b> (peluang individu terbesar) → <b style="color:var(--teal);">${pct1.toFixed(1)}%</b>`,
+    `Peluang Terbaik 2: peluang terbesar no.1 + no.2 → digit <b style="color:var(--amber);">${top1.d},${top2.d}</b> = <b style="color:var(--teal);">${pct2.toFixed(1)}%</b>`,
+    `Peluang Terbaik 3: peluang terbesar no.1 + no.2 + no.3 → digit <b style="color:var(--amber);">${top1.d},${top2.d},${top3.d}</b> = <b style="color:var(--teal);">${pct3.toFixed(1)}%</b>`
+  ];
 
   document.getElementById('simpulanCB').innerHTML =
     `<div style="display:flex; flex-direction:column; gap:5px; font-family:var(--mono); font-size:12.5px; margin-bottom:10px;">${stepLines.map(l => `<div>${l}</div>`).join('')}</div>`
-    + `Untuk mencapai peluang minimal 90%, dibutuhkan <b style="color:var(--ink);">${level90.digits.length} digit</b>: <b style="color:var(--amber);">${level90.digits.join(',')}</b> (${level90.pct.toFixed(1)}%). `
-    + `Catatan: filter Colok Bebas mewajibkan SEMUA digit yang dimasukkan muncul bersamaan dalam 1 angka — makin banyak digit yang dipasang sekaligus di kolom filter, makin sedikit kombinasi yang lolos, meski peluang "salah satu digit ini muncul" makin tinggi.`;
+    + `Tombol Peluang Terbaik 1/2/3 di bawah akan langsung mengisi digit terpilih ke kolom <b style="color:var(--ink);">Angka Ikut</b> pada Filter Pangkas Kombinasi. `
+    + `Catatan: filter Angka Ikut meloloskan angka yang mengandung SALAH SATU dari digit yang dimasukkan — makin banyak digit dipasang, makin besar peluang cocok, tapi jumlah kombinasi yang lolos juga makin banyak.`;
 }
 
 document.getElementById('pakaiJumlahBtn').addEventListener('click', () => {
@@ -638,22 +792,17 @@ document.getElementById('pakaiSelisihBtn').addEventListener('click', () => {
 });
 document.getElementById('pakaiCB1Btn').addEventListener('click', () => {
   if(!cbTopValues.top1) return;
-  document.getElementById('filterCB').value = cbTopValues.top1;
+  document.getElementById('filterAI').value = cbTopValues.top1;
   if(lastTop8Pools.length) applyFilters();
 });
 document.getElementById('pakaiCB2Btn').addEventListener('click', () => {
   if(!cbTopValues.top2) return;
-  document.getElementById('filterCB').value = cbTopValues.top2;
+  document.getElementById('filterAI').value = cbTopValues.top2;
   if(lastTop8Pools.length) applyFilters();
 });
 document.getElementById('pakaiCB3Btn').addEventListener('click', () => {
   if(!cbTopValues.top3) return;
-  document.getElementById('filterCB').value = cbTopValues.top3;
-  if(lastTop8Pools.length) applyFilters();
-});
-document.getElementById('pakaiCB4Btn').addEventListener('click', () => {
-  if(!cbTopValues.top90) return;
-  document.getElementById('filterCB').value = cbTopValues.top90;
+  document.getElementById('filterAI').value = cbTopValues.top3;
   if(lastTop8Pools.length) applyFilters();
 });
 
@@ -670,25 +819,7 @@ function weightedPick(items, weightFn){
   return items[items.length-1];
 }
 
-let lastTop8Pools = []; // array per posisi, tiap elemen array 8 digit teratas
-
-function renderTop8Generator(){
-  if(!lastAnalysis) return;
-  const { targetLen, transitionWeights } = lastAnalysis;
-  const groups = [];
-  lastTop8Pools = [];
-  for(let p = 0; p < targetLen; p++){
-    const weights = transitionWeights[p];
-    const ranked = Object.entries(weights)
-      .map(([d, c]) => ({ d, c }))
-      .sort((a, b) => b.c - a.c)
-      .slice(0, 8)
-      .map(r => r.d);
-    lastTop8Pools.push(ranked);
-    groups.push(ranked.join(''));
-  }
-  document.getElementById('bulkOut').value = groups.join(' x ');
-}
+let lastTop8Pools = []; // array per posisi, tiap elemen array 8 digit teratas — diisi lewat useModeInGenerator()
 
 function shuffle(arr){
   const a = arr.slice();
@@ -760,10 +891,14 @@ function getPositionPairs(len){
 function matchesPairPattern(str, i, j){
   const d = str.split('');
   if(d[i] !== d[j]) return false;
+  const rest = [];
   for(let k = 0; k < d.length; k++){
-    if(k !== i && k !== j && d[k] === d[i]) return false;
+    if(k !== i && k !== j){
+      if(d[k] === d[i]) return false;
+      rest.push(d[k]);
+    }
   }
-  return true;
+  return new Set(rest).size === rest.length; // posisi sisa wajib unik satu sama lain juga
 }
 
 function renderTwinMurniCheckboxes(len){
@@ -885,9 +1020,49 @@ document.getElementById('bulkCopyBtn').addEventListener('click', () => {
 
 document.getElementById('analyzeBtn').addEventListener('click', analyze);
 
-// ---------- Simpan / Muat / Hapus data historis ----------
+// ---------- Kode Keamanan (proteksi ringan untuk Simpan & Hapus) ----------
+const SECURITY_CODE = '321';
+function checkSecurityCode(actionLabel){
+  const input = prompt(`Masukkan kode keamanan untuk ${actionLabel}:`);
+  if(input === null) return false; // dibatalkan
+  if(input !== SECURITY_CODE){
+    alert('Kode salah. Aksi dibatalkan.');
+    return false;
+  }
+  return true;
+}
+
+// ---------- Simpan / Muat / Hapus data historis (Firebase Realtime Database) ----------
 const SAVE_KEY = 'analisaFrekuensi_savedData';
-let savedEntriesCache = null; // sumber utama untuk render — tetap berfungsi walau localStorage diblokir
+let savedEntriesCache = []; // sumber utama untuk render — diisi dari Firebase, fallback ke localStorage
+let firebaseReady = false;
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB1yunsgfeJ-cyjx24hb0mG9nnVDOHfzl4",
+  authDomain: "analisa-frekuensi.firebaseapp.com",
+  databaseURL: "https://analisa-frekuensi-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "analisa-frekuensi",
+  storageBucket: "analisa-frekuensi.firebasestorage.app",
+  messagingSenderId: "44538798162",
+  appId: "1:44538798162:web:c879bc4b44bc98371c3f8b"
+};
+
+let db = null;
+let authReadyPromise = Promise.resolve(false);
+try{
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.database();
+  // Anonymous sign-in: tanpa ini, Rules ".read/.write": "auth != null" akan menolak
+  // permintaan tanpa login — termasuk bot yang mencoba akses langsung tanpa lewat app ini.
+  authReadyPromise = firebase.auth().signInAnonymously()
+    .then(() => true)
+    .catch(e => {
+      console.error('Gagal sign-in anonim ke Firebase:', e);
+      const statusEl = document.getElementById('cloudStatus');
+      if(statusEl){ statusEl.textContent = '· ⚠️ gagal autentikasi cloud, pakai data lokal'; statusEl.style.color = 'var(--rose)'; }
+      return false;
+    });
+}catch(e){ console.error('Firebase gagal diinisialisasi:', e); }
 
 function loadSavedEntriesFromStorage(){
   try{
@@ -896,14 +1071,27 @@ function loadSavedEntriesFromStorage(){
   }catch(e){ return []; }
 }
 
+function cacheToLocalStorage(list){
+  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(list)); }catch(e){ /* localStorage diblokir — tetap jalan dari cache memori */ }
+}
+
 function getSavedEntries(){
-  if(savedEntriesCache === null){ savedEntriesCache = loadSavedEntriesFromStorage(); }
   return savedEntriesCache;
 }
 
 function setSavedEntries(list){
   savedEntriesCache = list;
-  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(list)); }catch(e){ /* localStorage diblokir — tetap jalan dari cache memori */ }
+  cacheToLocalStorage(list);
+  if(db){
+    authReadyPromise.then(isAuthed => {
+      if(!isAuthed) return; // tetap tersimpan lokal, tanpa sync cloud
+      db.ref('savedData').set(list).catch(e => {
+        console.error('Gagal sync ke cloud:', e);
+        document.getElementById('saveFeedback').textContent = 'Tersimpan lokal, tapi gagal sync ke cloud (cek koneksi internet).';
+        document.getElementById('saveFeedback').style.color = 'var(--rose)';
+      });
+    });
+  }
 }
 
 function renderSavedList(){
@@ -938,14 +1126,9 @@ function renderSavedList(){
   });
   box.querySelectorAll('.del').forEach(btn => {
     btn.addEventListener('click', () => {
-      if(btn.dataset.confirm !== '1'){
-        btn.dataset.confirm = '1';
-        btn.textContent = 'Yakin?';
-        setTimeout(() => { btn.dataset.confirm = '0'; btn.textContent = 'Hapus'; }, 2500);
-        return;
-      }
+      if(!checkSecurityCode('menghapus data ini')) return;
       const idx = parseInt(btn.dataset.idx, 10);
-      const entries = getSavedEntries();
+      const entries = getSavedEntries().slice();
       entries.splice(idx, 1);
       setSavedEntries(entries);
       renderSavedList();
@@ -961,7 +1144,8 @@ document.getElementById('saveDataBtn').addEventListener('click', () => {
     feedback.style.color = 'var(--rose)';
     return;
   }
-  const entries = getSavedEntries();
+  if(!checkSecurityCode('menyimpan data ini')) return;
+  const entries = getSavedEntries().slice();
   const nameInput = document.getElementById('saveNameInput');
   const trimmed = nameInput.value.trim() || `Data ${entries.length + 1}`;
   const savedAt = new Date().toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -971,29 +1155,51 @@ document.getElementById('saveDataBtn').addEventListener('click', () => {
   setSavedEntries(entries);
   renderSavedList();
   feedback.style.color = 'var(--teal)';
-  feedback.textContent = existingIdx >= 0 ? `Tersimpan (memperbarui "${trimmed}") ✓` : `Tersimpan sebagai "${trimmed}" ✓`;
+  feedback.textContent = existingIdx >= 0 ? `Tersimpan (memperbarui "${trimmed}") ✓ — sync ke cloud...` : `Tersimpan sebagai "${trimmed}" ✓ — sync ke cloud...`;
   nameInput.value = trimmed;
   setTimeout(() => { feedback.textContent = ''; }, 3000);
 });
 
-renderSavedList();
+// Muat data awal dari cloud, lalu dengarkan perubahan real-time (sync otomatis antar perangkat)
+// Menunggu sign-in anonim selesai dulu, karena Rules mewajibkan auth != null
+if(db){
+  authReadyPromise.then(isAuthed => {
+  if(!isAuthed){
+    savedEntriesCache = loadSavedEntriesFromStorage();
+    renderSavedList();
+    return;
+  }
+  db.ref('savedData').once('value')
+    .then(snap => {
+      savedEntriesCache = snap.exists() ? snap.val() : loadSavedEntriesFromStorage();
+      firebaseReady = true;
+      renderSavedList();
+      const statusEl = document.getElementById('cloudStatus');
+      if(statusEl){ statusEl.textContent = '· ☁️ tersinkron'; statusEl.style.color = 'var(--teal)'; }
+    })
+    .catch(e => {
+      console.error('Gagal ambil data cloud, pakai data lokal:', e);
+      savedEntriesCache = loadSavedEntriesFromStorage();
+      renderSavedList();
+      const statusEl = document.getElementById('cloudStatus');
+      if(statusEl){ statusEl.textContent = '· ⚠️ gagal konek cloud, pakai data lokal'; statusEl.style.color = 'var(--rose)'; }
+    });
 
-// jalankan sekali dengan data contoh saat pertama dibuka
+  db.ref('savedData').on('value', snap => {
+    if(!firebaseReady) return; // hindari trigger ganda saat load pertama
+    savedEntriesCache = snap.exists() ? snap.val() : [];
+    cacheToLocalStorage(savedEntriesCache);
+    renderSavedList();
+  });
+  }); // tutup authReadyPromise.then()
+} else {
+  savedEntriesCache = loadSavedEntriesFromStorage();
+  renderSavedList();
+}
+
+// tampilan awal dikosongkan — tunggu user tempel data sendiri
 window.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('dataInput').value = `6714
-2375
-7137
-5102
-0715
-3052
-1596
-8813
-6431
-5131
-9662
-0647
-9418
-4087`;
+  document.getElementById('dataInput').value = '';
   analyze();
 });
 </script>
