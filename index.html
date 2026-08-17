@@ -891,10 +891,14 @@ function getPositionPairs(len){
 function matchesPairPattern(str, i, j){
   const d = str.split('');
   if(d[i] !== d[j]) return false;
+  const rest = [];
   for(let k = 0; k < d.length; k++){
-    if(k !== i && k !== j && d[k] === d[i]) return false;
+    if(k !== i && k !== j){
+      if(d[k] === d[i]) return false;
+      rest.push(d[k]);
+    }
   }
-  return true;
+  return new Set(rest).size === rest.length; // posisi sisa wajib unik satu sama lain juga
 }
 
 function renderTwinMurniCheckboxes(len){
