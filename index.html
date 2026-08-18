@@ -177,28 +177,51 @@
   table.modetable th{font-size:10px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em; font-weight:600;}
   table.modetable td{font-family:var(--mono); color:var(--ink);}
   table.modetable tr:last-child td{border-bottom:none;}
+  table.modetable-merged td.modecell{font-weight:800; font-size:10.5px; color:var(--amber); vertical-align:middle;}
+  table.modetable-merged td.modecell .modemini2{font-family:var(--sans); font-weight:400; font-size:9px; color:var(--ink-dim); margin-top:3px; text-transform:none; letter-spacing:0;}
+  table.modetable-merged tr.grp-a{background:rgba(79,184,163,.04);}
+  table.modetable-merged tr.grp-b{background:transparent;}
+  table.modetable-merged td.digitstr span{letter-spacing:.02em;}
 
+  .fingerprint{display:flex; justify-content:space-between; align-items:baseline; font-family:var(--mono); font-weight:800; padding:6px 4px 2px;}
+  .heatgrid{display:grid; grid-template-columns:repeat(5, 1fr); gap:8px; margin-top:10px;}
+  .heatcell{aspect-ratio:1; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; border:1px solid var(--line); position:relative; overflow:hidden;}
+  .heatcell .digit{font-family:var(--mono); font-weight:800; z-index:1;}
+  .heatcell .pct{font-family:var(--mono); font-size:10.5px; z-index:1; opacity:.85;}
+  .heatcell .rank{position:absolute; top:6px; left:8px; font-family:var(--mono); font-size:9px; color:rgba(255,255,255,.35); z-index:1;}
+  .heatlegend{display:flex; align-items:center; gap:8px; margin-top:12px; font-family:var(--mono); font-size:10.5px; color:var(--ink-dim);}
+  .heatlegend .bar{flex:1; height:6px; border-radius:3px; background:linear-gradient(90deg, #182420, var(--teal));}
+
+  .kes8list{border:1px solid var(--line); border-radius:10px; overflow:hidden;}
   .kes8row{
-    display:flex; align-items:center; justify-content:space-between; gap:8px;
-    background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
-    padding:8px 10px; margin-bottom:6px; font-family:var(--mono);
+    display:flex; align-items:baseline; gap:10px; padding:9px 12px;
+    border-bottom:1px solid var(--line); font-family:var(--mono); font-size:12.5px;
   }
-  .kes8row .tag{font-family:var(--sans); font-size:10px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em; min-width:78px;}
-  .kes8row .angka{font-size:16px; font-weight:700; color:var(--amber); letter-spacing:.06em; flex:1; text-align:center;}
-  .kes8row .pct{font-size:12px; color:var(--teal); min-width:46px; text-align:right;}
+  .kes8row:last-child{border-bottom:none;}
+  .kes8row.grp-a{background:rgba(79,184,163,.04);}
+  .kes8row .modelbl{
+    flex-shrink:0; width:58px; font-family:var(--sans); font-weight:800; font-size:9.5px;
+    color:var(--amber); text-transform:uppercase; letter-spacing:.04em; line-height:1.3;
+  }
+  .kes8row .line{flex:1; color:var(--ink); letter-spacing:.02em; word-break:break-all;}
+  .kes8row .line .pos{color:var(--ink-dim); font-size:10.5px; margin-right:1px;}
+  .kes8row .line .sep{color:var(--line); margin:0 6px;}
 
+  .toplist{border:1px solid var(--line); border-radius:10px; overflow:hidden;}
   .toprow{
-    background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
-    padding:8px 10px; margin-bottom:6px; font-family:var(--mono); font-size:12.5px;
+    display:flex; align-items:center; gap:8px; padding:9px 10px;
+    border-bottom:1px solid var(--line); font-family:var(--mono); font-size:12px; flex-wrap:wrap;
   }
-  .toprow .poslbl{font-family:var(--sans); font-weight:700; color:var(--ink); font-size:12px; margin-bottom:4px; text-transform:uppercase; letter-spacing:.05em;}
-  .toprow .tline{display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; margin-top:2px;}
-  .toprow .tline b{color:var(--ink-dim); font-family:var(--sans); font-size:10px; text-transform:uppercase; letter-spacing:.05em; min-width:44px; display:inline-block;}
-  .toprow .tline label{display:inline-flex; align-items:center; gap:4px; cursor:pointer; user-select:none;}
-  .toprow .tline input[type="checkbox"]{width:13px; height:13px; accent-color:var(--teal); cursor:pointer; margin:0;}
-  .toprow .tline.t1 span{color:var(--teal); font-weight:700;}
-  .toprow .tline.t2 span{color:var(--amber); font-weight:700;}
-  .toprow .tline.t3 span{color:var(--rose); font-weight:700;}
+  .toprow:last-child{border-bottom:none;}
+  .toprow.grp-a{background:rgba(79,184,163,.04);}
+  .toprow .poslbl{flex-shrink:0; width:22px; font-family:var(--sans); font-weight:800; font-size:12px; color:var(--ink);}
+  .toprow .tiercell{display:flex; align-items:center; gap:4px; flex:1; min-width:82px;}
+  .toprow .tiercell input[type="checkbox"]{width:12px; height:12px; accent-color:var(--teal); margin:0; cursor:pointer; flex-shrink:0;}
+  .toprow .tiercell .dot{width:6px; height:6px; border-radius:50%; flex-shrink:0;}
+  .toprow .tiercell.t1 .dot{background:var(--teal);}
+  .toprow .tiercell.t2 .dot{background:var(--amber);}
+  .toprow .tiercell.t3 .dot{background:var(--rose);}
+  .toprow .tiercell .digits{color:var(--ink); letter-spacing:.02em;}
 </style>
 </head>
 <body>
@@ -254,7 +277,7 @@
     <div class="kandidat" style="margin-top:14px;">
       <div class="lbl">Kesimpulan · 8 Digit Terbaik per Posisi (A=Ribuan, C=Ratusan, K=Puluhan, E=Satuan)</div>
       <p class="hint" style="margin:0 0 8px;">Satu baris per mode — tiap posisi berisi 8 digit dengan persentase tertinggi.</p>
-      <div id="kesimpulan8"></div>
+      <div id="kesimpulan8" class="kes8list"></div>
       <div class="lbl" style="margin-top:12px;">TOP · Irisan Mode per Posisi</div>
       <p class="hint" style="margin:0 0 8px;">Pilih mode yang mau diikutkan dalam irisan. TOP 1 = ada di semua mode terpilih, TOP 2 = ada di (jumlah mode terpilih − 1), TOP 3 = sisanya.</p>
       <div class="row" style="margin-top:0;">
@@ -263,7 +286,7 @@
         <label class="chk"><input type="checkbox" id="modeChkMistikBaru" checked> MISTIK BARU</label>
         <label class="chk"><input type="checkbox" id="modeChkIndex" checked> INDEX</label>
       </div>
-      <div id="topGabungan" style="margin-top:10px;"></div>
+      <div id="topGabungan" class="toplist" style="margin-top:10px;"></div>
       <div class="lbl" style="margin-top:10px;">Pakai ke Generator</div>
       <div class="row" style="margin-top:6px;">
         <button class="btn" id="pakaiNormalBtn">NORMAL</button>
@@ -529,20 +552,21 @@ function renderTopGabungan(){
   }
   box.innerHTML = lastPosLabels.map((label, idx) => {
     const { top1, top2, top3 } = computeTopGabungan(lastModeResults, idx, selectedModes);
-    const tierLine = (tier, tierLabel, arr) => {
+    const tierCell = (tier, arr) => {
       const key = `${idx}_${tier}`;
       if(!(key in topTierSelection)) topTierSelection[key] = (tier === 1); // default: Top 1 aktif
       const checked = topTierSelection[key] ? 'checked' : '';
-      return `<div class="tline t${tier}">
-          <label><input type="checkbox" class="topTierChk" data-pos="${idx}" data-tier="${tier}" ${checked}><b>${tierLabel}</b></label>
-          <span>${arr.join('') || '–'}</span>
-        </div>`;
+      return `<label class="tiercell t${tier}">
+          <input type="checkbox" class="topTierChk" data-pos="${idx}" data-tier="${tier}" ${checked}>
+          <span class="dot"></span>
+          <span class="digits">${arr.join('') || '–'}</span>
+        </label>`;
     };
-    return `<div class="toprow">
+    return `<div class="toprow ${idx % 2 === 0 ? 'grp-a' : ''}">
         <div class="poslbl">${label}</div>
-        ${tierLine(1, 'Top 1', top1)}
-        ${tierLine(2, 'Top 2', top2)}
-        ${tierLine(3, 'Top 3', top3)}
+        ${tierCell(1, top1)}
+        ${tierCell(2, top2)}
+        ${tierCell(3, top3)}
       </div>`;
   }).join('');
 
@@ -584,28 +608,37 @@ function useTopInGenerator(){
 }
 document.getElementById('pakaiTopBtn').addEventListener('click', useTopInGenerator);
 
-function renderModeTable(modeKey, result, posLabels){
-  const { lastDigits, rankedPerPos, globalStats } = result;
-  const rows = rankedPerPos.map((ranked, idx) => {
-    const top8 = ranked.filter(r => r.pct > 0).slice(0, 8).map(r => r.d).join('');
-    const topPct = ranked[0].pct;
-    return `<tr>
-      <td>${posLabels[idx] || ('P' + (idx+1))}</td>
-      <td>${lastDigits[idx]}</td>
-      <td style="letter-spacing:.05em;"><b style="color:var(--amber);">${top8}</b></td>
-      <td>${topPct.toFixed(1)}%</td>
-    </tr>`;
-  }).join('');
-  return `<div class="modeblock">
-    <div class="modehead">
-      <span>${MODE_LABELS[modeKey]}</span>
-      <span class="modemini">Naik ${globalStats.naikPct.toFixed(0)}% · Tetap ${globalStats.tetapPct.toFixed(0)}% · Turun ${globalStats.turunPct.toFixed(0)}%</span>
-    </div>
-    <table class="modetable">
-      <thead><tr><th>Pos</th><th>Terakhir</th><th>8 Digit Terbaik</th><th>%</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>`;
+function renderMergedModeTable(modeResults, posLabels){
+  function colorFor(t){
+    const r = Math.round(157 + t * (79 - 157));
+    const g = Math.round(179 + t * (184 - 179));
+    const b = Math.round(168 + t * (163 - 168));
+    return `rgb(${r},${g},${b})`;
+  }
+  let bodyRows = '';
+  MODE_ORDER.forEach((key, gi) => {
+    const r = modeResults[key];
+    const grpClass = gi % 2 === 0 ? 'grp-a' : 'grp-b';
+    r.rankedPerPos.forEach((ranked, idx) => {
+      const top8 = ranked.filter(x => x.pct > 0).slice(0, 8);
+      const max = top8.length ? top8[0].pct : 0;
+      const min = top8.length ? top8[top8.length - 1].pct : 0;
+      const str = top8.map(x => {
+        const t = (x.pct - min) / ((max - min) || 1);
+        const w = 400 + t * 400;
+        return `<span style="color:${colorFor(t)}; font-weight:${w};">${x.d}</span>`;
+      }).join('');
+      bodyRows += `<tr class="${grpClass}">`;
+      if(idx === 0){
+        bodyRows += `<td class="modecell" rowspan="${r.rankedPerPos.length}"><div>${MODE_LABELS[key]}</div><div class="modemini2">Naik ${r.globalStats.naikPct.toFixed(0)}% · Tetap ${r.globalStats.tetapPct.toFixed(0)}% · Turun ${r.globalStats.turunPct.toFixed(0)}%</div></td>`;
+      }
+      bodyRows += `<td>${posLabels[idx] || ('P' + (idx+1))}</td><td>${r.lastDigits[idx]}</td><td class="digitstr">${str}</td><td>${(top8[0] ? top8[0].pct : 0).toFixed(1)}%</td></tr>`;
+    });
+  });
+  return `<table class="modetable modetable-merged">
+    <thead><tr><th>Mode</th><th>Pos</th><th>Trkhr</th><th>8 Digit Terbaik</th><th>%</th></tr></thead>
+    <tbody>${bodyRows}</tbody>
+  </table>`;
 }
 
 function parseData(raw){
@@ -675,20 +708,22 @@ function analyze(){
   lastModeResults = modeResults;
 
   const container = document.getElementById('posCols');
-  container.innerHTML = MODE_ORDER.map(key => renderModeTable(key, modeResults[key], posLabels)).join('<div style="height:2px;background:var(--line);margin:10px 0;"></div>');
+  container.innerHTML = renderMergedModeTable(modeResults, posLabels);
 
   document.getElementById('posCopyArea').value = MODE_ORDER
     .map(key => `${MODE_LABELS[key]}: ${modeResults[key].kandidatUtama}`)
     .join(' | ');
   document.getElementById('resultCard').style.display = 'block';
 
-  // ---------- Kesimpulan: per mode, 8 digit terbaik tiap posisi digabung "A xxxx x C xxxx x K xxxx x E xxxx" ----------
-  document.getElementById('kesimpulan8').innerHTML = MODE_ORDER.map(key => {
+  // ---------- Kesimpulan: per mode, 8 digit terbaik tiap posisi, 1 list ringkas ----------
+  document.getElementById('kesimpulan8').innerHTML = MODE_ORDER.map((key, i) => {
     const r = modeResults[key];
-    const line = r.top8Pools.map((pool, idx) => `${posLabels[idx]} ${pool.join('')}`).join(' x ');
-    return `<div class="kes8row" style="flex-direction:column; align-items:flex-start; gap:4px;">
-        <span class="tag">${MODE_LABELS[key]}</span>
-        <span class="angka" style="text-align:left; font-size:13px; letter-spacing:.02em;">${line}</span>
+    const line = r.top8Pools
+      .map((pool, idx) => `<span class="pos">${posLabels[idx]}</span>${pool.join('')}`)
+      .join('<span class="sep">|</span>');
+    return `<div class="kes8row ${i % 2 === 0 ? 'grp-a' : ''}">
+        <span class="modelbl">${MODE_LABELS[key]}</span>
+        <span class="line">${line}</span>
       </div>`;
   }).join('');
 
@@ -819,6 +854,36 @@ function renderColokBebas(used){
   };
 
   const top6Set = new Set(ranked.slice(0, 6).map(r => r.d));
+  const heatMax = Math.max(...counts.map(c => c/total*100));
+  const heatMin = Math.min(...counts.map(c => c/total*100));
+  const rankedDigitIdx = counts.map((c,d) => d).sort((a,b) => counts[b]-counts[a]);
+  function heatColor(pct){
+    const t = (pct - heatMin) / ((heatMax - heatMin) || 1);
+    const r = Math.round(24 + t * (79 - 24));
+    const g = Math.round(36 + t * (184 - 36));
+    const b = Math.round(32 + t * (163 - 32));
+    return { css: `rgb(${r},${g},${b})`, t };
+  }
+  const fingerprintHTML = Array.from({length:10}, (_,d) => d).map(d => {
+    const pct = counts[d]/total*100;
+    const { t } = heatColor(pct);
+    const size = (16 + t*16).toFixed(1);
+    const color = pct === heatMax ? 'var(--teal)' : (pct === heatMin ? 'var(--rose)' : 'var(--ink-dim)');
+    return `<span style="font-size:${size}px; color:${color};">${d}</span>`;
+  }).join('');
+  const heatHTML = Array.from({length:10}, (_,d) => d).map(d => {
+    const pct = counts[d]/total*100;
+    const { css, t } = heatColor(pct);
+    const light = t > 0.5;
+    const rank = rankedDigitIdx.indexOf(d) + 1;
+    const size = (18 + t*14).toFixed(1);
+    return `<div class="heatcell" style="background:${css};">
+      <span class="rank">#${rank}</span>
+      <span class="digit" style="font-size:${size}px; color:${light ? '#0e1512' : '#e9f1ec'}">${d}</span>
+      <span class="pct" style="color:${light ? 'rgba(14,21,18,.7)' : 'var(--ink-dim)'}">${pct.toFixed(1)}%</span>
+    </div>`;
+  }).join('');
+
   const container = document.getElementById('cbCol');
   container.innerHTML = '';
   const col = document.createElement('div');
@@ -828,9 +893,9 @@ function renderColokBebas(used){
       <span class="name">Angka Ikut</span>
       <span class="lastbadge">${used.length} data</span>
     </div>
-    <div style="display:flex; flex-wrap:wrap; gap:6px 8px;">
-      ${ranked.map(r => `<span class="topchip ${top6Set.has(r.d) ? 'top' : ''}"><b>${r.d}</b>${r.pct.toFixed(1)}%</span>`).join('')}
-    </div>`;
+    <div class="fingerprint">${fingerprintHTML}</div>
+    <div class="heatgrid">${heatHTML}</div>
+    <div class="heatlegend"><span>jarang</span><div class="bar"></div><span>sering</span></div>`;
   container.appendChild(col);
 
   const stepLines = [
