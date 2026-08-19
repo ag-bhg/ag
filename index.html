@@ -223,6 +223,35 @@
   .toprow .tiercell.t2 .dot{background:var(--amber);}
   .toprow .tiercell.t3 .dot{background:var(--rose);}
   .toprow .tiercell .digits{color:var(--ink); letter-spacing:.02em;}
+
+  .fxGrid{display:grid; grid-template-columns:repeat(2, 1fr); gap:10px;}
+  .fxCol{background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px; min-width:0;}
+  .fxCol h3{margin:0 0 8px; font-size:12px; color:var(--amber); text-transform:uppercase; letter-spacing:.06em; font-weight:700;}
+  .fxOptList{display:flex; flex-direction:column; gap:6px; max-height:260px; overflow-y:auto; padding-right:2px;}
+  .fxOpt{display:flex; align-items:center; gap:5px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; font-family:var(--mono); font-size:11px; cursor:pointer; background:var(--panel); flex-shrink:0;}
+  .fxOpt .lbl{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .fxOpt input[type="radio"]{accent-color:var(--teal); width:13px; height:13px; margin:0; cursor:pointer; flex-shrink:0;}
+  .fxOpt .pct{color:var(--amber); font-weight:700; margin-left:auto; white-space:nowrap; flex-shrink:0;}
+  .fxOpt.top3{border-color:var(--teal); background:rgba(79,184,163,.08);}
+  .fxOpt.top3 .pct{color:var(--teal);}
+  .fxTrendList{display:flex; flex-direction:column; gap:6px;}
+  .fxTrendRow{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px; border:1px solid var(--line); border-radius:8px; font-family:var(--mono); font-size:12px; background:var(--panel);}
+  .fxTrendRow .lbl{color:var(--ink-dim); white-space:nowrap;}
+  .fxTrendRow .digits{color:var(--teal); font-weight:700; letter-spacing:.03em; white-space:nowrap;}
+
+  .fxTableToggle{cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px;}
+  .fxKpi{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;}
+  .fxKpi div{flex:1; min-width:88px; text-align:center; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:9px 4px;}
+  .fxKpi .v{font-family:var(--mono); font-size:15px; font-weight:700; color:var(--ink);}
+  .fxKpi .l{font-size:9.5px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.04em; margin-top:2px;}
+  .fxTableScroll{max-height:420px; overflow:auto; border:1px solid var(--line); border-radius:10px;}
+  table.fxTable{width:100%; border-collapse:collapse; font-size:12px; font-family:var(--mono);}
+  table.fxTable th, table.fxTable td{padding:7px 8px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap;}
+  table.fxTable th{font-family:var(--sans); font-size:10px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em; font-weight:600; position:sticky; top:0; background:var(--panel-2);}
+  table.fxTable tr:last-child td{border-bottom:none;}
+  .fxOk{color:var(--teal); font-weight:700;}
+  .fxBad{color:var(--rose); font-weight:700;}
+  .fxSelect{background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:13px; padding:8px 10px; border-radius:8px;}
 </style>
 </head>
 <body>
@@ -273,91 +302,105 @@
   </div>
 
   <div class="card" id="resultCard" style="display:none;">
-    <h2>Analisis Angka Tarung</h2>
-    <p class="hint" style="margin-top:0;">Empat cara baca: NORMAL (angka apa adanya), MISTIK LAMA, MISTIK BARU, dan INDEX (angka dikonversi dulu pakai tabel kode, baru pola naik/turun/tetapnya dihitung).</p>
+    <h2>Formula X — Rekomendasi Tren per Posisi</h2>
+    <p class="hint" style="margin-top:0;">Lima formula dasar (NORMAL, MISTIK LAMA, MISTIK BARU, INDEX, BHG/Naik4Turun3) diuraikan jadi beberapa varian sumber per posisi. Tiap varian diuji akurasi trennya di data terakhir, lalu diurutkan dari yang paling akurat.</p>
     <div class="row" style="margin-top:0;">
-      <button class="btn" id="togglePosBtn">👁 Sembunyikan Tabel &amp; Kesimpulan</button>
+      <label style="font-size:12px; color:var(--ink-dim);">Jendela tren N =</label>
+      <select id="fxTrendN" class="fxSelect">
+        <option value="7">7</option>
+        <option value="8">8</option>
+        <option value="9">9</option>
+        <option value="10" selected>10</option>
+      </select>
+      <label style="font-size:12px; color:var(--ink-dim);">Kontrol N (NRL/ML/MB/IDX) =</label>
+      <select id="fxControlN" class="fxSelect">
+        <option value="5">5</option>
+        <option value="7" selected>7</option>
+        <option value="10">10</option>
+      </select>
+      <button class="btn primary" id="fxRecalcBtn">🔁 Hitung Ulang</button>
     </div>
-    <div id="posKesimpulanWrap">
-      <div id="posCols"></div>
-      <div class="kandidat" style="margin-top:14px;">
-        <div class="lbl">Kesimpulan · AT per Posisi (A=Ribuan, C=Ratusan, K=Puluhan, E=Satuan)</div>
-        <p class="hint" style="margin:0 0 8px;">Satu baris per mode — tiap posisi berisi 8 digit dengan persentase tertinggi.</p>
-        <div id="kesimpulan8" class="kes8list"></div>
+    <p class="hint" id="fxStatus" style="margin:8px 0 0; min-height:14px;"></p>
+    <div id="fxCols" style="margin-top:12px;"></div>
+
+    <div class="lbl fxTableToggle" id="fxTableToggle" style="margin-top:16px;">📊 TABEL FORMULA X <span id="fxTableToggleIcon">▸</span></div>
+    <p class="hint" style="margin:4px 0 0;">Klik judul di atas untuk menampilkan riwayat uji sukses/gagal (backtest) dari formula yang sedang dipilih tiap posisi.</p>
+    <div id="fxTableWrap" style="display:none; margin-top:10px;">
+      <div class="fxKpi" id="fxKpiBox"></div>
+      <div class="fxTableScroll">
+        <table class="fxTable" id="fxBacktestTable">
+          <thead><tr id="fxTableHead"></tr></thead>
+          <tbody id="fxTableBody"></tbody>
+        </table>
       </div>
     </div>
-    <div class="kandidat" style="margin-top:14px;">
-      <div class="lbl" style="margin-top:0;">TOP · Irisan Mode per Posisi</div>
-      <p class="hint" style="margin:0 0 8px;">Pilih mode yang mau diikutkan dalam irisan. TOP 1 = ada di semua mode terpilih, TOP 2 = ada di (jumlah mode terpilih − 1), TOP 3 = sisanya.</p>
-      <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:8px; align-items:center;">
-        <label class="chk"><input type="checkbox" id="modeChkNormal" checked> NORMAL</label>
-        <label class="chk"><input type="checkbox" id="modeChkMistikLama" checked> MISTIK LAMA</label>
-        <input type="text" id="modeCountInput" inputmode="numeric" value="7" placeholder="Jumlah" style="grid-column:3; grid-row:1; width:100%; min-width:0; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:13px; padding:9px 8px; border-radius:9px;">
-        <label class="chk"><input type="checkbox" id="modeChkMistikBaru" checked> MISTIK BARU</label>
-        <label class="chk"><input type="checkbox" id="modeChkIndex" checked> INDEX</label>
-        <button class="btn primary" id="modeCountGoBtn" style="grid-column:3; grid-row:2; width:100%;">GO</button>
+
+    <div class="lbl fxTableToggle" id="fxTrendToggle" style="margin-top:16px;">🎯 ANGKA HASIL TREN <span id="fxTrendToggleIcon">▸</span></div>
+    <p class="hint" style="margin:4px 0 0;">Klik judul di atas untuk menampilkan 3 varian dengan akurasi tren tertinggi tiap posisi, sebagai pool 8 digit siap pakai.</p>
+    <div id="fxTrendWrap" style="display:none; margin-top:10px;">
+      <div id="fxTrendCols"></div>
+
+      <div class="row" style="margin-top:12px;">
+        <button class="btn primary" id="fxApplyBtn">↳ Pakai ke Generator</button>
       </div>
-      <p class="hint" id="modeCountFeedback" style="margin:6px 0 0; min-height:14px;"></p>
-      <div id="topGabungan" class="toplist" style="margin-top:10px;"></div>
-      <div class="lbl" style="margin-top:10px;">Pakai ke Generator</div>
-      <div class="row" style="margin-top:6px;">
-        <button class="btn" id="pakaiNormalBtn">NORMAL</button>
-        <button class="btn" id="pakaiMistikLamaBtn">MISTIK LAMA</button>
-        <button class="btn" id="pakaiMistikBaruBtn">MISTIK BARU</button>
-        <button class="btn" id="pakaiIndexBtn">INDEX</button>
-        <button class="btn primary" id="pakaiTopBtn">TOP</button>
-      </div>
-      <p class="hint" style="margin:6px 0 0;">Menekan salah satu tombol akan mengisi ulang Generator &amp; Kombinasi Acak di bawah pakai 8 digit teratas per posisi dari mode tersebut. Tombol <b>TOP</b> memakai digit dari Top 1/2/3 yang dicentang di atas untuk tiap posisi (A/C/K/E).</p>
+      <p class="hint" style="margin:6px 0 0;">Tiap kolom posisi menampilkan semua varian formula diurut berdasar akurasi tren — 3 teratas ditandai hijau/teal. Radio menentukan varian yang dipakai; default otomatis memilih yang akurasinya tertinggi. Tombol <b>Pakai ke Generator</b> mengisi ulang Generator &amp; Kombinasi Acak di bawah pakai pilihan ini.</p>
     </div>
   </div>
 
   <div class="card" id="jsCard" style="display:none;">
-    <h2>Analisis Jumlah & Selisih</h2>
-    <p class="hint" style="margin-top:0;">Jumlah = total semua digit mod 10. Selisih = selisih mutlak digit pertama dan digit terakhir. Dihitung langsung dari seluruh data historis yang dipakai.</p>
-    <div class="poscols" id="jsCols"></div>
-    <div class="kandidat" style="margin-top:14px;">
-      <div class="lbl">Kesimpulan data terbaik</div>
-      <p class="hint" id="simpulanJS" style="margin:0 0 10px;"></p>
-      <div class="row" style="margin-top:0;">
-        <button class="btn" id="pakaiJumlahBtn">↳ Pakai Jumlah di Filter</button>
-        <button class="btn" id="pakaiSelisihBtn">↳ Pakai Selisih di Filter</button>
+    <h2 class="fxTableToggle" id="jsToggle" style="cursor:pointer;">Analisis Jumlah & Selisih <span id="jsToggleIcon">▸</span></h2>
+    <div id="jsWrap" style="display:none;">
+      <p class="hint" style="margin-top:0;">Jumlah = total semua digit mod 10. Selisih = selisih mutlak digit pertama dan digit terakhir. Dihitung langsung dari seluruh data historis yang dipakai.</p>
+      <div class="poscols" id="jsCols"></div>
+      <div class="kandidat" style="margin-top:14px;">
+        <div class="lbl">Kesimpulan data terbaik</div>
+        <p class="hint" id="simpulanJS" style="margin:0 0 10px;"></p>
+        <div class="row" style="margin-top:0;">
+          <button class="btn" id="pakaiJumlahBtn">↳ Pakai Jumlah di Filter</button>
+          <button class="btn" id="pakaiSelisihBtn">↳ Pakai Selisih di Filter</button>
+        </div>
       </div>
     </div>
 
-    <h2 style="margin-top:18px;">ANALISIS ANGKA IKUT 4D</h2>
-    <p class="hint" style="margin-top:0;">Persentase dihitung dari berapa banyak data historis yang mengandung digit tersebut di posisi mana pun (bukan sekadar frekuensi mentah), jadi digit kembar dalam satu angka tidak menggelembungkan hasil.</p>
-    <div id="cbCol"></div>
-    <div class="kandidat" style="margin-top:14px;">
-      <div class="lbl">Kesimpulan Angka Ikut</div>
-      <p class="hint" id="simpulanCB" style="margin:0 0 10px;"></p>
-      <div class="row" style="margin-top:0;">
-        <button class="btn" id="pakaiCB1Btn">↳ Pakai Peluang Terbaik 1</button>
-        <button class="btn" id="pakaiCB2Btn">↳ Pakai Peluang Terbaik 2</button>
-        <button class="btn" id="pakaiCB3Btn">↳ Pakai Peluang Terbaik 3</button>
+    <h2 class="fxTableToggle" id="cbToggle" style="cursor:pointer; margin-top:18px;">ANALISIS ANGKA IKUT 4D <span id="cbToggleIcon">▸</span></h2>
+    <div id="cbWrap" style="display:none;">
+      <p class="hint" style="margin-top:0;">Persentase dihitung dari berapa banyak data historis yang mengandung digit tersebut di posisi mana pun (bukan sekadar frekuensi mentah), jadi digit kembar dalam satu angka tidak menggelembungkan hasil.</p>
+      <div id="cbCol"></div>
+      <div class="kandidat" style="margin-top:14px;">
+        <div class="lbl">Kesimpulan Angka Ikut</div>
+        <p class="hint" id="simpulanCB" style="margin:0 0 10px;"></p>
+        <div class="row" style="margin-top:0;">
+          <button class="btn" id="pakaiCB1Btn">↳ Pakai Peluang Terbaik 1</button>
+          <button class="btn" id="pakaiCB2Btn">↳ Pakai Peluang Terbaik 2</button>
+          <button class="btn" id="pakaiCB3Btn">↳ Pakai Peluang Terbaik 3</button>
+        </div>
       </div>
     </div>
-    <h2 style="margin-top:18px;">ANALISIS SHIO 2D 4D</h2>
-    <p class="hint" style="margin-top:0;">Dihitung dari 3 pasangan digit dalam satu angka 4D: <b>AC</b> (posisi 1-2), <b>CK</b> (posisi 2-3), <b>KE</b> (posisi 3-4, 2D asli). Tiap pasangan diubah ke angka 0-99 lalu dicari sisa bagi 12 untuk menentukan shio (sisa 0 = Shio 12). Persentase ketiga posisi dijumlahkan jadi "Total Hadir di 4D" per shio. Hanya tersedia untuk data 4 digit.</p>
-    <div id="shioCol"></div>
-    <p class="hint" id="simpulanShio" style="margin:10px 0 0;"></p>
-    <div class="kandidat" style="margin-top:10px;">
-      <div class="lbl">Pilih Shio (dipakai langsung sebagai Filter AI Shio 4D)</div>
-      <div class="row" id="shioPickGroup" style="margin-top:6px;">
-        <label class="chk"><input type="checkbox" id="filterShioAll"> Pilih Semua</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="1"> Shio 1</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="2"> Shio 2</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="3"> Shio 3</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="4"> Shio 4</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="5"> Shio 5</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="6"> Shio 6</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="7"> Shio 7</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="8"> Shio 8</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="9"> Shio 9</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="10"> Shio 10</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="11"> Shio 11</label>
-        <label class="chk"><input type="checkbox" class="shioPick" data-shio="12"> Shio 12</label>
+
+    <h2 class="fxTableToggle" id="shioToggle" style="cursor:pointer; margin-top:18px;">ANALISIS SHIO 2D 4D <span id="shioToggleIcon">▸</span></h2>
+    <div id="shioWrap" style="display:none;">
+      <p class="hint" style="margin-top:0;">Dihitung dari 3 pasangan digit dalam satu angka 4D: <b>AC</b> (posisi 1-2), <b>CK</b> (posisi 2-3), <b>KE</b> (posisi 3-4, 2D asli). Tiap pasangan diubah ke angka 0-99 lalu dicari sisa bagi 12 untuk menentukan shio (sisa 0 = Shio 12). Persentase ketiga posisi dijumlahkan jadi "Total Hadir di 4D" per shio. Hanya tersedia untuk data 4 digit.</p>
+      <div id="shioCol"></div>
+      <p class="hint" id="simpulanShio" style="margin:10px 0 0;"></p>
+      <div class="kandidat" style="margin-top:10px;">
+        <div class="lbl">Pilih Shio (dipakai langsung sebagai Filter AI Shio 4D)</div>
+        <div class="row" id="shioPickGroup" style="margin-top:6px;">
+          <label class="chk"><input type="checkbox" id="filterShioAll"> Pilih Semua</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="1"> Shio 1</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="2"> Shio 2</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="3"> Shio 3</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="4"> Shio 4</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="5"> Shio 5</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="6"> Shio 6</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="7"> Shio 7</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="8"> Shio 8</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="9"> Shio 9</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="10"> Shio 10</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="11"> Shio 11</label>
+          <label class="chk"><input type="checkbox" class="shioPick" data-shio="12"> Shio 12</label>
+        </div>
+        <p class="hint" id="shioPickNote" style="margin:8px 0 0;">Centang salah satu atau lebih shio di atas untuk dipakai sebagai Filter AI Shio 4D. Kombinasi lolos filter kalau salah satu dari AC/CK/KE-nya masuk shio yang dicentang.</p>
       </div>
-      <p class="hint" id="shioPickNote" style="margin:8px 0 0;">Centang salah satu atau lebih shio di atas untuk dipakai sebagai Filter AI Shio 4D. Kombinasi lolos filter kalau salah satu dari AC/CK/KE-nya masuk shio yang dicentang.</p>
     </div>
   </div>
 
@@ -455,13 +498,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
-let lastAnalysis = null; // { targetLen, posNames, transitionWeights, lastDigits, globalStats }
-let modeDataCount = 7; // default: AT dihitung dari 7 data terbaru. null/kosong via GO = pakai semua data.
-let lastBacktestResults = null; // { normal, mistikLama, mistikBaru, index } — hasil computeBacktestForMode tiap mode
-let lastHistoryNumbers = []; // data historis yang dipakai untuk filter "buang yang sudah keluar"
-let lastModeResults = null; // { normal, mistikLama, mistikBaru, index } — hasil computeModeAnalysis tiap mode
-let lastPosLabels = null; // ['A','C','K','E'] dst — dipakai ulang saat checkbox mode TOP berubah
-let topTierSelection = {}; // key `${posIdx}_${tier}` -> boolean, status checkbox Top 1/2/3 per posisi
+let lastHistoryNumbers = []; // data historis yang dipakai untuk filter "buang yang sudah keluar" (newest-first)
+let lastPosLabels = null; // ['A','C','K','E'] dst — dipakai ulang saat Formula X dihitung ulang
 // ---------- Tabel kode Mistik Lama / Mistik Baru / Index ----------
 const DIGIT_MAPS = {
   normal: null,
@@ -469,8 +507,11 @@ const DIGIT_MAPS = {
   mistikBaru: {0:8,1:7,2:6,3:9,4:5,5:4,6:2,7:1,8:0,9:3},
   index:      {0:5,1:6,2:7,3:8,4:9,5:0,6:1,7:2,8:3,9:4}
 };
-const MODE_LABELS = { normal:'NORMAL', mistikLama:'MISTIK LAMA', mistikBaru:'MISTIK BARU', index:'INDEX' };
-const MODE_ORDER = ['normal','mistikLama','mistikBaru','index'];
+
+// ---------- Formula X: state ----------
+let FX_RECOMMENDATIONS = null; // { posLabel: [{key,label,source,pct,hit,total}, ...] } terurut dari akurasi tertinggi
+let FX_SELECTED = {};          // posLabel -> key varian yang dipilih (radio)
+let FX_FORMULAS_CACHE = null;  // { formulas, controlN } — daftar formula terakhir dipakai computeFormulaX(), dipakai ulang oleh fxApplyToGenerator()
 
 function applyDigitMap(numStr, map){
   if(!map) return numStr;
@@ -478,25 +519,7 @@ function applyDigitMap(numStr, map){
 }
 
 // Hitung perilaku naik/turun/tetap + peluang digit berikutnya untuk SATU mode (NORMAL/MISTIK LAMA/MISTIK BARU/INDEX)
-// ---------- Uji akurasi (backtest) AT: geser jendela N-data dari data terlama ke terbaru, cek apakah A/C/K/E berikutnya masuk pool AT ----------
-function computeBacktestForMode(usedAll, targetLen, map, controlN){
-  const chrono = usedAll.slice().reverse(); // urut lama -> baru
-  if(!controlN || controlN <= 0 || chrono.length <= controlN) return { total: 0, success: 0, fail: 0 };
-  let success = 0, fail = 0;
-  for(let start = 0; start <= chrono.length - controlN - 1; start++){
-    const windowChrono = chrono.slice(start, start + controlN);
-    const target = chrono[start + controlN];
-    const windowNewestFirst = windowChrono.slice().reverse();
-    const r = computeModeAnalysis(windowNewestFirst, targetLen, map);
-    let ok = true;
-    for(let p = 0; p < targetLen; p++){
-      if(!r.top8Pools[p].includes(target[p])){ ok = false; break; }
-    }
-    if(ok) success++; else fail++;
-  }
-  return { total: success + fail, success, fail };
-}
-
+// Dipakai ulang oleh Formula X: rankedPerPos[sourceIdx] = pool 8 digit teratas berdasar riwayat delta posisi sourceIdx itu sendiri.
 function computeModeAnalysis(used, targetLen, map){
   const mapped = used.map(n => applyDigitMap(n, map));
   const chrono = mapped.slice().reverse(); // terlama -> terbaru
@@ -504,14 +527,15 @@ function computeModeAnalysis(used, targetLen, map){
   const lastDigits = [];
   for(let p = 0; p < targetLen; p++) lastDigits.push(parseInt(mapped[0][p], 10));
 
-  const globalDeltaCounts = new Array(10).fill(0);
+  // PER POSISI: setiap posisi (A/C/K/E) punya tabel delta sendiri, tidak digabung dengan posisi lain.
+  const deltaCountsPerPos = Array.from({length: targetLen}, () => new Array(10).fill(0));
   let globalNaik = 0, globalTurun = 0, globalTetap = 0;
   for(let i = 0; i < chrono.length - 1; i++){
     for(let p = 0; p < targetLen; p++){
       const prevD = parseInt(chrono[i][p], 10);
       const nextD = parseInt(chrono[i+1][p], 10);
       const modDelta = (nextD - prevD + 10) % 10;
-      globalDeltaCounts[modDelta]++;
+      deltaCountsPerPos[p][modDelta]++;
       const raw = nextD - prevD;
       if(raw > 0) globalNaik++; else if(raw < 0) globalTurun++; else globalTetap++;
     }
@@ -528,7 +552,7 @@ function computeModeAnalysis(used, targetLen, map){
     const weights = {};
     for(let d = 0; d <= 9; d++){
       const neededDelta = (d - lastDigits[p] + 10) % 10;
-      weights[String(d)] = globalDeltaCounts[neededDelta];
+      weights[String(d)] = deltaCountsPerPos[p][neededDelta]; // hanya pakai riwayat delta posisi p sendiri
     }
     transitionWeights.push(weights);
   }
@@ -549,89 +573,322 @@ function computeModeAnalysis(used, targetLen, map){
   return { lastDigits, transitionWeights, globalStats, rankedPerPos, kandidatUtama, kandidatAlt, pctUtama, pctAlt, top8Pools };
 }
 
-// Hitung irisan mode TERPILIH per posisi: TOP1 = ada di semua mode terpilih, TOP2 = ada di (N-1) mode, TOP3 = sisanya
-function computeTopGabungan(modeResults, posIdx, selectedModes){
-  const N = selectedModes.length;
-  const membership = {};
-  for(let d = 0; d <= 9; d++){
-    let count = 0, pctSum = 0;
-    selectedModes.forEach(key => {
-      const pool = modeResults[key].top8Pools[posIdx];
-      if(pool.includes(String(d))) count++;
-      const entry = modeResults[key].rankedPerPos[posIdx].find(r => r.d === String(d));
-      pctSum += entry ? entry.pct : 0;
+// ---------- Formula X ----------
+// 5 formula dasar: 4 formula statistik (delta riwayat posisi sumber) + 1 formula BHG (Naik4Turun3, dari digit terakhir langsung).
+const FX_BASES = [
+  { code:'NRL', map: DIGIT_MAPS.normal,     kind:'stat' },
+  { code:'ML',  map: DIGIT_MAPS.mistikLama, kind:'stat' },
+  { code:'MB',  map: DIGIT_MAPS.mistikBaru, kind:'stat' },
+  { code:'IDX', map: DIGIT_MAPS.index,      kind:'stat' },
+  { code:'BHG', map: null,                  kind:'bhg'  }
+];
+
+function mod10(x){ return ((x % 10) + 10) % 10; }
+
+// BHG / Naik4Turun3: dari 1 digit terakhir, ambil 4 naik + digit itu sendiri + 3 turun = 8 kandidat.
+function naik4turun3(d){
+  const naik = [1,2,3,4].map(i => mod10(d + i));
+  const turun = [1,2,3].map(i => mod10(d - i));
+  return [...naik, d, ...turun].map(String);
+}
+
+// Pool 8-digit teratas untuk SETIAP posisi sumber (dipakai lintas posisi target), dari 1 window data (newest-first).
+function statPoolsAllSources(windowNewestFirst, map, targetLen){
+  if(windowNewestFirst.length < 1) return Array.from({length: targetLen}, () => []);
+  return computeModeAnalysis(windowNewestFirst, targetLen, map).rankedPerPos.map(r => r.slice(0, 8).map(x => x.d));
+}
+function bhgPoolsAllSources(windowNewestFirst, targetLen){
+  const last = windowNewestFirst[0].split('').map(ch => parseInt(ch, 10));
+  return last.slice(0, targetLen).map(d => naik4turun3(d));
+}
+
+// Susun daftar varian formula: tiap base x tiap posisi-sumber = 1 varian. fn(windowNewestFirst) -> pool per posisi target (sama untuk semua posisi, diambil dari 1 posisi sumber).
+function fxBuildFormulaList(posLabels, controlN){
+  const targetLen = posLabels.length;
+  const list = [];
+  FX_BASES.forEach(base => {
+    posLabels.forEach((sourceLabel, sIdx) => {
+      list.push({
+        key: base.code + '_' + sourceLabel,
+        label: base.code,
+        source: sourceLabel,
+        kind: base.kind,
+        fn: (windowNewestFirst) => {
+          const pool = base.kind === 'stat'
+            ? statPoolsAllSources(windowNewestFirst.slice(0, controlN), base.map, targetLen)[sIdx]
+            : bhgPoolsAllSources(windowNewestFirst, targetLen)[sIdx];
+          return posLabels.map(() => pool);
+        }
+      });
     });
-    membership[d] = { count, pctSum };
+  });
+  return list;
+}
+
+// Uji akurasi tren: geser mundur dari data terbaru, tiap langkah pakai window sebelumnya untuk menebak 1 data berikutnya, sampai N transisi terkumpul.
+function fxTrendAccuracy(formula, chronoNum, controlN, trendN, posIdx){
+  const minNeeded = (formula.kind === 'bhg') ? 1 : Math.min(controlN, 1);
+  let hit = 0, total = 0;
+  for(let i = chronoNum.length - 1; i >= 1 && total < trendN; i--){
+    const available = chronoNum.slice(0, i);
+    if(available.length < minNeeded) break;
+    const windowNewestFirst = available.slice().reverse();
+    let pools;
+    try{ pools = formula.fn(windowNewestFirst); }catch(e){ break; }
+    const target = chronoNum[i];
+    if(pools[posIdx] && pools[posIdx].includes(target[posIdx])) hit++;
+    total++;
   }
-  const digits = Array.from({length: 10}, (_, d) => d);
-  const byPctDesc = (a, b) => membership[b].pctSum - membership[a].pctSum;
-  const top1 = digits.filter(d => membership[d].count === N).sort(byPctDesc);
-  const top2 = digits.filter(d => membership[d].count === N - 1).sort(byPctDesc);
-  const top3 = digits.filter(d => membership[d].count <= N - 2).sort(byPctDesc);
-  return { top1, top2, top3 };
+  return { hit, total, pct: total > 0 ? (hit / total * 100) : 0 };
 }
 
-function getSelectedModes(){
-  const map = { normal: 'modeChkNormal', mistikLama: 'modeChkMistikLama', mistikBaru: 'modeChkMistikBaru', index: 'modeChkIndex' };
-  return MODE_ORDER.filter(key => document.getElementById(map[key]).checked);
+function computeFormulaX(used, posLabels){
+  const controlN = parseInt(document.getElementById('fxControlN').value, 10);
+  const trendN = parseInt(document.getElementById('fxTrendN').value, 10);
+  const chronoNum = used.slice().reverse(); // urut lama -> baru
+  const formulas = fxBuildFormulaList(posLabels, controlN);
+  FX_FORMULAS_CACHE = { formulas, controlN };
+
+  const recs = {};
+  posLabels.forEach((label, idx) => {
+    const arr = [];
+    formulas.forEach(f => {
+      const r = fxTrendAccuracy(f, chronoNum, controlN, trendN, idx);
+      if(r.total > 0) arr.push({ key: f.key, label: f.label, source: f.source, hit: r.hit, total: r.total, pct: r.pct });
+    });
+    arr.sort((a, b) => b.pct - a.pct);
+    recs[label] = arr;
+  });
+  FX_RECOMMENDATIONS = recs;
+
+  posLabels.forEach(label => {
+    const stillValid = recs[label].some(o => o.key === FX_SELECTED[label]);
+    if(!stillValid) FX_SELECTED[label] = recs[label][0] ? recs[label][0].key : null;
+  });
+
+  renderFormulaX(posLabels);
+  renderFxTrendNumbers(posLabels, used);
+  renderFxBacktestTable(posLabels, used);
+
+  const status = document.getElementById('fxStatus');
+  const anyData = posLabels.some(l => recs[l].length > 0);
+  if(anyData){
+    status.style.color = 'var(--teal)';
+    status.textContent = `Akurasi dihitung dari maksimal ${trendN} transisi terakhir per varian (kontrol ${controlN}).`;
+  } else {
+    status.style.color = 'var(--rose)';
+    status.textContent = 'Data historis belum cukup untuk menghitung tren Formula X.';
+  }
 }
 
-function renderTopGabungan(){
-  if(!lastModeResults || !lastPosLabels) return;
-  const selectedModes = getSelectedModes();
-  const box = document.getElementById('topGabungan');
-  if(selectedModes.length === 0){
-    box.innerHTML = '<p class="emptynote">Pilih minimal 1 mode untuk melihat irisan TOP.</p>';
+function renderFormulaX(posLabels){
+  const grid = document.getElementById('fxCols');
+  if(!FX_RECOMMENDATIONS){ grid.innerHTML = ''; return; }
+  const wrap = document.createElement('div');
+  wrap.className = 'fxGrid';
+  posLabels.forEach(label => {
+    const col = document.createElement('div');
+    col.className = 'fxCol';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Posisi ' + label;
+    col.appendChild(h3);
+    const list = document.createElement('div');
+    list.className = 'fxOptList';
+    (FX_RECOMMENDATIONS[label] || []).forEach((opt, i) => {
+      const row = document.createElement('label');
+      row.className = 'fxOpt' + (i < 3 ? ' top3' : '');
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'fxpos_' + label;
+      radio.value = opt.key;
+      radio.checked = (opt.key === FX_SELECTED[label]);
+      radio.addEventListener('change', () => { FX_SELECTED[label] = opt.key; });
+      row.appendChild(radio);
+      const txt = document.createElement('span');
+      txt.className = 'lbl';
+      txt.textContent = opt.label + ' (' + opt.source + ')';
+      row.appendChild(txt);
+      const pct = document.createElement('span');
+      pct.className = 'pct';
+      pct.textContent = opt.pct.toFixed(1) + '%';
+      row.appendChild(pct);
+      list.appendChild(row);
+    });
+    if(!(FX_RECOMMENDATIONS[label] || []).length){
+      list.innerHTML = '<p class="emptynote" style="padding:8px 0;">Data belum cukup.</p>';
+    }
+    col.appendChild(list);
+    wrap.appendChild(col);
+  });
+  grid.innerHTML = '';
+  grid.appendChild(wrap);
+}
+
+// Tampilkan 3 varian teratas tiap posisi sebagai pool 8 digit langsung (bukan persentase) — "ANGKA HASIL TREN"
+function renderFxTrendNumbers(posLabels, used){
+  const grid = document.getElementById('fxTrendCols');
+  if(!FX_RECOMMENDATIONS || !FX_FORMULAS_CACHE){ grid.innerHTML = ''; return; }
+  const formulaByKey = {};
+  FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fxGrid';
+  posLabels.forEach((label, idx) => {
+    const col = document.createElement('div');
+    col.className = 'fxCol';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Posisi ' + label;
+    col.appendChild(h3);
+    const list = document.createElement('div');
+    list.className = 'fxTrendList';
+    const top3 = (FX_RECOMMENDATIONS[label] || []).slice(0, 3);
+    top3.forEach(opt => {
+      const f = formulaByKey[opt.key];
+      let pool = [];
+      if(f){
+        try{ pool = f.fn(used)[idx] || []; }catch(e){ pool = []; }
+      }
+      const row = document.createElement('div');
+      row.className = 'fxTrendRow';
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = opt.label + ' (' + opt.source + ')';
+      const digits = document.createElement('span');
+      digits.className = 'digits';
+      digits.textContent = pool.join('');
+      row.appendChild(lbl);
+      row.appendChild(digits);
+      list.appendChild(row);
+    });
+    if(!top3.length){
+      list.innerHTML = '<p class="emptynote" style="padding:6px 0;">Data belum cukup.</p>';
+    }
+    col.appendChild(list);
+    wrap.appendChild(col);
+  });
+  grid.innerHTML = '';
+  grid.appendChild(wrap);
+}
+
+// ---------- TABEL FORMULA X: backtest sukses/gagal dari formula yang sedang DIPILIH (radio) tiap posisi ----------
+function renderFxBacktestTable(posLabels, used){
+  const kpiBox = document.getElementById('fxKpiBox');
+  const thead = document.getElementById('fxTableHead');
+  const tbody = document.getElementById('fxTableBody');
+
+  if(!FX_FORMULAS_CACHE){ kpiBox.innerHTML = ''; thead.innerHTML = ''; tbody.innerHTML = ''; return; }
+
+  const formulaByKey = {};
+  FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
+  const selFn = posLabels.map(label => formulaByKey[FX_SELECTED[label]]);
+
+  if(selFn.some(f => !f)){
+    kpiBox.innerHTML = '<p class="emptynote">Pilih varian Formula X dulu untuk tiap posisi.</p>';
+    thead.innerHTML = '';
+    tbody.innerHTML = '';
     return;
   }
-  box.innerHTML = lastPosLabels.map((label, idx) => {
-    const { top1, top2, top3 } = computeTopGabungan(lastModeResults, idx, selectedModes);
-    const tierCell = (tier, arr) => {
-      const key = `${idx}_${tier}`;
-      if(!(key in topTierSelection)) topTierSelection[key] = (tier === 1); // default: Top 1 aktif
-      const checked = topTierSelection[key] ? 'checked' : '';
-      return `<label class="tiercell t${tier}">
-          <input type="checkbox" class="topTierChk" data-pos="${idx}" data-tier="${tier}" ${checked}>
-          <span class="dot"></span>
-          <span class="digits">${arr.join('') || '–'}</span>
-        </label>`;
-    };
-    return `<div class="toprow ${idx % 2 === 0 ? 'grp-a' : ''}">
-        <div class="poslbl">${label}</div>
-        ${tierCell(1, top1)}
-        ${tierCell(2, top2)}
-        ${tierCell(3, top3)}
-      </div>`;
-  }).join('');
 
-  box.querySelectorAll('.topTierChk').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const key = `${cb.dataset.pos}_${cb.dataset.tier}`;
-      topTierSelection[key] = cb.checked;
-    });
+  const controlN = FX_FORMULAS_CACHE.controlN;
+  const minNeeded = Math.max(...selFn.map(f => f.kind === 'bhg' ? 1 : controlN));
+  const chronoNum = used.slice().reverse(); // lama -> baru
+
+  let success = 0, fail = 0;
+  const posFail = posLabels.map(() => 0);
+  const rows = [];
+  for(let i = minNeeded; i < chronoNum.length; i++){
+    const availableChrono = chronoNum.slice(0, i);
+    const windowNewestFirst = availableChrono.slice().reverse();
+    const target = chronoNum[i];
+    const hitFlags = [];
+    let anyFail = false;
+    for(let p = 0; p < posLabels.length; p++){
+      let pools;
+      try{ pools = selFn[p].fn(windowNewestFirst); }catch(e){ pools = null; }
+      const hit = !!(pools && pools[p] && pools[p].includes(target[p]));
+      hitFlags.push(hit);
+      if(!hit){ posFail[p]++; anyFail = true; }
+    }
+    const ok = !anyFail;
+    if(ok) success++; else fail++;
+    rows.push({ prev: chronoNum[i - 1], target, hitFlags, ok });
+  }
+  rows.reverse(); // tampilkan dari yang terbaru
+
+  const total = success + fail;
+  kpiBox.innerHTML = '';
+  function kpiEl(label, value){
+    const d = document.createElement('div');
+    d.innerHTML = `<div class="v">${value}</div><div class="l">${label}</div>`;
+    kpiBox.appendChild(d);
+  }
+  kpiEl('Total Transisi', total);
+  kpiEl('Sukses (semua posisi)', success);
+  kpiEl('Gagal', fail);
+  kpiEl('Akurasi Keseluruhan', total > 0 ? (success / total * 100).toFixed(1) + '%' : '-');
+  posLabels.forEach((label, i) => {
+    kpiEl('Akurasi ' + label, total > 0 ? ((total - posFail[i]) / total * 100).toFixed(1) + '%' : '-');
   });
+
+  thead.innerHTML = '<th>Sumber</th><th>Angka Aktual</th>' + posLabels.map(l => `<th>${l}</th>`).join('') + '<th>Status</th>';
+
+  if(!rows.length){
+    tbody.innerHTML = `<tr><td colspan="${posLabels.length + 3}" class="emptynote">Data belum cukup untuk backtest (butuh minimal ${minNeeded + 1} data).</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const cells = r.hitFlags.map(f => `<td class="${f ? 'fxOk' : 'fxBad'}">${f ? 'OK' : 'X'}</td>`).join('');
+    return `<tr><td>${r.prev}</td><td>${r.target}</td>${cells}<td class="${r.ok ? 'fxOk' : 'fxBad'}">${r.ok ? 'SUKSES' : 'GAGAL'}</td></tr>`;
+  }).join('');
 }
-['modeChkNormal','modeChkMistikLama','modeChkMistikBaru','modeChkIndex'].forEach(id => {
-  document.getElementById(id).addEventListener('change', renderTopGabungan);
+
+document.getElementById('fxTableToggle').addEventListener('click', () => {
+  const wrap = document.getElementById('fxTableWrap');
+  const icon = document.getElementById('fxTableToggleIcon');
+  const isHidden = wrap.style.display === 'none';
+  wrap.style.display = isHidden ? 'block' : 'none';
+  icon.textContent = isHidden ? '▾' : '▸';
 });
 
-// Isi Generator & Kombinasi Acak pakai digit dari Top 1/2/3 yang dicentang di tiap posisi (A/C/K/E)
-function useTopInGenerator(){
-  if(!lastModeResults || !lastPosLabels) return;
-  const selectedModes = getSelectedModes();
-  if(selectedModes.length === 0){ alert('Pilih minimal 1 mode (NORMAL/MISTIK LAMA/MISTIK BARU/INDEX) dulu di bagian TOP.'); return; }
+document.getElementById('fxTrendToggle').addEventListener('click', () => {
+  const wrap = document.getElementById('fxTrendWrap');
+  const icon = document.getElementById('fxTrendToggleIcon');
+  const isHidden = wrap.style.display === 'none';
+  wrap.style.display = isHidden ? 'block' : 'none';
+  icon.textContent = isHidden ? '▾' : '▸';
+});
+
+function setupSectionToggle(headId, wrapId, iconId){
+  document.getElementById(headId).addEventListener('click', () => {
+    const wrap = document.getElementById(wrapId);
+    const icon = document.getElementById(iconId);
+    const isHidden = wrap.style.display === 'none';
+    wrap.style.display = isHidden ? 'block' : 'none';
+    icon.textContent = isHidden ? '▾' : '▸';
+  });
+}
+setupSectionToggle('jsToggle', 'jsWrap', 'jsToggleIcon');
+setupSectionToggle('cbToggle', 'cbWrap', 'cbToggleIcon');
+setupSectionToggle('shioToggle', 'shioWrap', 'shioToggleIcon');
+
+// Isi Generator & Kombinasi Acak pakai varian Formula X yang dipilih (radio) tiap posisi
+function fxApplyToGenerator(){
+  if(!FX_FORMULAS_CACHE || !lastPosLabels || !lastHistoryNumbers.length){
+    alert('Hitung Formula X dulu (isi Data Historis lalu Hitung Frekuensi).');
+    return;
+  }
+  const formulaByKey = {};
+  FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
 
   const pools = lastPosLabels.map((label, idx) => {
-    const { top1, top2, top3 } = computeTopGabungan(lastModeResults, idx, selectedModes);
-    const picked = [];
-    if(topTierSelection[`${idx}_1`]) picked.push(...top1);
-    if(topTierSelection[`${idx}_2`]) picked.push(...top2);
-    if(topTierSelection[`${idx}_3`]) picked.push(...top3);
-    return picked.map(String);
+    const f = formulaByKey[FX_SELECTED[label]];
+    if(!f) return [];
+    const allPools = f.fn(lastHistoryNumbers); // lastHistoryNumbers sudah newest-first
+    return allPools[idx] || [];
   });
 
-  if(pools.some(p => p.length === 0)){
-    alert('Tiap posisi (A/C/K/E) harus punya minimal satu Top yang dicentang.');
+  if(pools.some(p => !p.length)){
+    alert('Tiap posisi (' + lastPosLabels.join('/') + ') harus punya varian Formula X yang valid — coba Hitung Ulang.');
     return;
   }
 
@@ -640,44 +897,10 @@ function useTopInGenerator(){
   generateCombineOutput();
   if(document.getElementById('filterCard').style.display === 'block') resetFilters();
 }
-document.getElementById('pakaiTopBtn').addEventListener('click', useTopInGenerator);
-
-function renderMergedModeTable(modeResults, posLabels, backtestResults, controlN){
-  function colorFor(t){
-    const r = Math.round(157 + t * (79 - 157));
-    const g = Math.round(179 + t * (184 - 179));
-    const b = Math.round(168 + t * (163 - 168));
-    return `rgb(${r},${g},${b})`;
-  }
-  let bodyRows = '';
-  MODE_ORDER.forEach((key, gi) => {
-    const r = modeResults[key];
-    const bt = backtestResults ? backtestResults[key] : null;
-    const btLine = bt && bt.total > 0
-      ? `Uji akurasi (kontrol ${controlN}): ${bt.total}x — sukses ${bt.success}x, gagal ${bt.fail}x`
-      : `Uji akurasi (kontrol ${controlN}): data belum cukup`;
-    const grpClass = gi % 2 === 0 ? 'grp-a' : 'grp-b';
-    r.rankedPerPos.forEach((ranked, idx) => {
-      const top8 = ranked.filter(x => x.pct > 0).slice(0, 8);
-      const max = top8.length ? top8[0].pct : 0;
-      const min = top8.length ? top8[top8.length - 1].pct : 0;
-      const str = top8.map(x => {
-        const t = (x.pct - min) / ((max - min) || 1);
-        const w = 400 + t * 400;
-        return `<span style="color:${colorFor(t)}; font-weight:${w};">${x.d}</span>`;
-      }).join('');
-      bodyRows += `<tr class="${grpClass}">`;
-      if(idx === 0){
-        bodyRows += `<td class="modecell" rowspan="${r.rankedPerPos.length}"><div>${MODE_LABELS[key]}</div><div class="modemini2">Naik ${r.globalStats.naikPct.toFixed(0)}% · Tetap ${r.globalStats.tetapPct.toFixed(0)}% · Turun ${r.globalStats.turunPct.toFixed(0)}%</div><div class="modemini3">${btLine}</div></td>`;
-      }
-      bodyRows += `<td>${posLabels[idx] || ('P' + (idx+1))}</td><td>${r.lastDigits[idx]}</td><td class="digitstr">${str}</td><td>${(top8[0] ? top8[0].pct : 0).toFixed(1)}%</td></tr>`;
-    });
-  });
-  return `<table class="modetable modetable-merged">
-    <thead><tr><th>Mode</th><th>Pos</th><th>Trkhr</th><th>AT</th><th>%</th></tr></thead>
-    <tbody>${bodyRows}</tbody>
-  </table>`;
-}
+document.getElementById('fxApplyBtn').addEventListener('click', fxApplyToGenerator);
+document.getElementById('fxRecalcBtn').addEventListener('click', () => {
+  if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
+});
 
 function parseData(raw){
   // Kalau satu baris punya banyak kolom (dipisah tab/spasi ganda, mis. Tanggal - Kode - Angka),
@@ -767,12 +990,18 @@ function analyze(){
     document.getElementById('jsCard').style.display = 'none';
     document.getElementById('bulkCard').style.display = 'none';
     document.getElementById('filterCard').style.display = 'none';
-    lastAnalysis = null;
-    lastModeResults = null;
     lastPosLabels = null;
-    topTierSelection = {};
     lastTop8Pools = [];
     lastHistoryNumbers = [];
+    FX_RECOMMENDATIONS = null;
+    FX_SELECTED = {};
+    FX_FORMULAS_CACHE = null;
+    document.getElementById('fxCols').innerHTML = '';
+    document.getElementById('fxTrendCols').innerHTML = '';
+    document.getElementById('fxKpiBox').innerHTML = '';
+    document.getElementById('fxTableHead').innerHTML = '';
+    document.getElementById('fxTableBody').innerHTML = '';
+    document.getElementById('fxStatus').textContent = '';
     jsTopValues = { jumlah: [], selisih: [] };
     cbTopValues = { top1: null, top2: null, top3: null };
     return;
@@ -784,73 +1013,23 @@ function analyze(){
       ? ['C','K','E']
       : ['K','E'];
 
-  // ---------- Hitung 4 mode: NORMAL, MISTIK LAMA, MISTIK BARU, INDEX ----------
-  // modeDataCount: null/0/lebih besar dari data yang ada = pakai semua; kalau diisi via GO, hanya N data terbaru (paling atas) yang dipakai.
-  const modeUsed = (modeDataCount && modeDataCount > 0 && modeDataCount < used.length)
-    ? used.slice(0, modeDataCount)
-    : used;
-  const modeResults = {};
-  MODE_ORDER.forEach(key => { modeResults[key] = computeModeAnalysis(modeUsed, targetLen, DIGIT_MAPS[key]); });
-  lastModeResults = modeResults;
-
-  const backtestResults = {};
-  MODE_ORDER.forEach(key => { backtestResults[key] = computeBacktestForMode(used, targetLen, DIGIT_MAPS[key], modeUsed.length); });
-  lastBacktestResults = backtestResults;
-
-  const container = document.getElementById('posCols');
-  container.innerHTML = renderMergedModeTable(modeResults, posLabels, backtestResults, modeUsed.length);
-
-  const modeCountFeedback = document.getElementById('modeCountFeedback');
-  modeCountFeedback.style.color = 'var(--teal)';
-  modeCountFeedback.textContent = (modeUsed.length === used.length)
-    ? `Memakai semua data (${used.length}).`
-    : `Memakai ${modeUsed.length} data terbaru dari total ${used.length}.`;
-  document.getElementById('resultCard').style.display = 'block';
-
-  // ---------- Kesimpulan: per mode, 8 digit terbaik tiap posisi, 1 list ringkas ----------
-  document.getElementById('kesimpulan8').innerHTML = MODE_ORDER.map((key, i) => {
-    const r = modeResults[key];
-    const line = r.top8Pools
-      .map((pool, idx) => `<span class="pos">${posLabels[idx]}</span>${pool.join('')}`)
-      .join('<span class="sep">|</span>');
-    return `<div class="kes8row ${i % 2 === 0 ? 'grp-a' : ''}">
-        <span class="modelbl">${MODE_LABELS[key]}</span>
-        <span class="line">${line}</span>
-      </div>`;
-  }).join('');
-
   lastPosLabels = posLabels;
-  topTierSelection = {};
-  renderTopGabungan();
+  lastHistoryNumbers = used; // newest-first, dipakai Formula X & filter "buang yang sudah keluar"
+
+  document.getElementById('resultCard').style.display = 'block';
+  computeFormulaX(used, posLabels);
 
   renderJumlahSelisih(used);
   renderColokBebas(used);
   renderShioAnalysis(used, targetLen);
 
-  lastAnalysis = { targetLen, posLabels, transitionWeights: modeResults.normal.transitionWeights, lastDigits: modeResults.normal.lastDigits, globalStats: modeResults.normal.globalStats };
-  lastHistoryNumbers = used;
-
   document.getElementById('bulkCard').style.display = 'block';
-  useModeInGenerator('normal');
+  fxApplyToGenerator();
 
   document.getElementById('filterCard').style.display = 'block';
   renderTwinMurniCheckboxes(targetLen);
   resetFilters();
 }
-
-// Isi Generator & Kombinasi Acak pakai top-8 pool per posisi dari mode terpilih (NORMAL/MISTIK LAMA/MISTIK BARU/INDEX)
-function useModeInGenerator(modeKey){
-  if(!lastModeResults) return;
-  const r = lastModeResults[modeKey];
-  lastTop8Pools = r.top8Pools;
-  document.getElementById('bulkOut').value = r.top8Pools.map(p => p.join('')).join(' x ');
-  generateCombineOutput();
-  if(document.getElementById('filterCard').style.display === 'block') resetFilters();
-}
-document.getElementById('pakaiNormalBtn').addEventListener('click', () => useModeInGenerator('normal'));
-document.getElementById('pakaiMistikLamaBtn').addEventListener('click', () => useModeInGenerator('mistikLama'));
-document.getElementById('pakaiMistikBaruBtn').addEventListener('click', () => useModeInGenerator('mistikBaru'));
-document.getElementById('pakaiIndexBtn').addEventListener('click', () => useModeInGenerator('index'));
 
 let jsTopValues = { jumlah: [], selisih: [] }; // 8 nilai jumlah & selisih paling sering keluar (utk tombol pakai-di-filter)
 
@@ -1012,17 +1191,17 @@ function shioOf12(twoDigitStr){
 }
 
 function renderShioAnalysis(used, targetLen){
-  const jsCard = document.getElementById('jsCard');
-  const shioHeading = [...jsCard.querySelectorAll('h2')].find(h => h.textContent.includes('SHIO'));
-  const shioBlocks = [shioHeading, shioHeading?.nextElementSibling, document.getElementById('shioCol'),
-    document.getElementById('simpulanShio'), document.getElementById('simpulanShio')?.nextElementSibling];
+  const shioToggle = document.getElementById('shioToggle');
+  const shioWrap = document.getElementById('shioWrap');
 
   if(targetLen !== 4){
-    shioBlocks.forEach(el => { if(el) el.style.display = 'none'; });
+    if(shioToggle) shioToggle.style.display = 'none';
+    if(shioWrap) shioWrap.style.display = 'none';
     shioTotals = {};
     return;
   }
-  shioBlocks.forEach(el => { if(el) el.style.display = ''; });
+  if(shioToggle) shioToggle.style.display = '';
+  // jangan paksa buka shioWrap di sini — biarkan mengikuti state toggle terakhir (klik judul)
 
   const countsAC = new Array(13).fill(0);
   const countsCK = new Array(13).fill(0);
@@ -1131,7 +1310,7 @@ function weightedPick(items, weightFn){
   return items[items.length-1];
 }
 
-let lastTop8Pools = []; // array per posisi, tiap elemen array 8 digit teratas — diisi lewat useModeInGenerator()
+let lastTop8Pools = []; // array per posisi, tiap elemen array 8 digit teratas — diisi lewat fxApplyToGenerator()
 
 function shuffle(arr){
   const a = arr.slice();
@@ -1170,31 +1349,6 @@ document.getElementById('combineCopyBtn').addEventListener('click', () => {
     const ta = document.getElementById('combineOut');
     ta.select(); document.execCommand('copy');
   });
-});
-
-document.getElementById('togglePosBtn').addEventListener('click', () => {
-  const wrap = document.getElementById('posKesimpulanWrap');
-  const btn = document.getElementById('togglePosBtn');
-  const isHidden = wrap.style.display === 'none';
-  wrap.style.display = isHidden ? 'block' : 'none';
-  btn.textContent = isHidden ? '👁 Sembunyikan Tabel & Kesimpulan' : '👁 Tampilkan Tabel & Kesimpulan';
-});
-
-document.getElementById('modeCountGoBtn').addEventListener('click', () => {
-  const feedback = document.getElementById('modeCountFeedback');
-  const val = document.getElementById('modeCountInput').value.trim();
-  if(val === ''){
-    modeDataCount = null;
-  } else {
-    const n = parseInt(val.replace(/[^0-9]/g, ''), 10);
-    if(!Number.isFinite(n) || n <= 0){
-      feedback.style.color = 'var(--rose)';
-      feedback.textContent = 'Isi angka lebih dari 0, atau kosongkan untuk pakai semua data.';
-      return;
-    }
-    modeDataCount = n;
-  }
-  analyze();
 });
 
 function isNoTwin(num){
