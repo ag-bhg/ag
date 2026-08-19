@@ -179,6 +179,7 @@
   table.modetable tr:last-child td{border-bottom:none;}
   table.modetable-merged td.modecell{font-weight:800; font-size:10.5px; color:var(--amber); vertical-align:middle;}
   table.modetable-merged td.modecell .modemini2{font-family:var(--sans); font-weight:400; font-size:9px; color:var(--ink-dim); margin-top:3px; text-transform:none; letter-spacing:0;}
+  table.modetable-merged td.modecell .modemini3{font-family:var(--sans); font-weight:600; font-size:9px; color:var(--teal); margin-top:4px; text-transform:none; letter-spacing:0;}
   table.modetable-merged tr.grp-a{background:rgba(79,184,163,.04);}
   table.modetable-merged tr.grp-b{background:transparent;}
   table.modetable-merged td.digitstr span{letter-spacing:.02em;}
@@ -235,14 +236,19 @@
   <div class="card">
     <h2>Data Historis</h2>
     <textarea id="dataInput" placeholder="Tempel data historis di sini, satu angka per baris..."></textarea>
-    <p class="hint">Boleh dipisah baris baru, spasi, koma, atau tanda *. Panjang digit campur akan otomatis dikelompokkan per panjang yang paling banyak muncul.</p>
-    <div class="row">
+    <div class="row" style="align-items:center;">
+      <p class="hint" style="flex:1; min-width:150px; margin:0;">Boleh dipisah baris baru, spasi, koma, atau tanda *. Panjang digit campur akan otomatis dikelompokkan per panjang yang paling banyak muncul.</p>
+      <input type="text" id="quickInputDigits" inputmode="numeric" maxlength="5" placeholder="Angka baru (4-5 digit)" style="width:170px; flex:none; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:14px; padding:9px 12px; border-radius:9px;">
+    </div>
+    <div class="row" style="justify-content:space-between;">
       <button class="btn primary" id="analyzeBtn">Hitung Frekuensi</button>
+      <button class="btn primary" id="quickInputBtn">➕ Input</button>
     </div>
     <div class="stats" style="margin-top:12px;">
       <div class="stat"><div class="n" id="totalCount">0</div><div class="l">Data dipakai</div></div>
       <div class="stat"><div class="n" id="skippedCount">0</div><div class="l">Dilewati (format beda)</div></div>
     </div>
+    <p class="hint" id="quickInputFeedback" style="margin:6px 0 0; min-height:14px;"></p>
     <div class="row" style="margin-top:14px; border-top:1px solid var(--line); padding-top:14px;">
       <input type="text" id="saveNameInput" placeholder="Nama data, mis. Sydney Agustus" style="flex:1; min-width:150px; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--sans); font-size:13.5px; padding:9px 12px; border-radius:9px;">
       <button class="btn primary" id="saveDataBtn">💾 Simpan</button>
@@ -267,25 +273,31 @@
   </div>
 
   <div class="card" id="resultCard" style="display:none;">
-    <h2>Perilaku Perubahan per Posisi</h2>
+    <h2>Analisis Angka Tarung</h2>
     <p class="hint" style="margin-top:0;">Empat cara baca: NORMAL (angka apa adanya), MISTIK LAMA, MISTIK BARU, dan INDEX (angka dikonversi dulu pakai tabel kode, baru pola naik/turun/tetapnya dihitung).</p>
-    <div id="posCols"></div>
-    <textarea id="posCopyArea" readonly style="margin-top:10px; min-height:auto; height:44px; font-size:12px;"></textarea>
-    <div class="row" style="margin-top:6px;">
-      <button class="btn" id="posCopyBtn">Salin Hasil Analisis</button>
+    <div class="row" style="margin-top:0;">
+      <button class="btn" id="togglePosBtn">👁 Sembunyikan Tabel &amp; Kesimpulan</button>
+    </div>
+    <div id="posKesimpulanWrap">
+      <div id="posCols"></div>
+      <div class="kandidat" style="margin-top:14px;">
+        <div class="lbl">Kesimpulan · AT per Posisi (A=Ribuan, C=Ratusan, K=Puluhan, E=Satuan)</div>
+        <p class="hint" style="margin:0 0 8px;">Satu baris per mode — tiap posisi berisi 8 digit dengan persentase tertinggi.</p>
+        <div id="kesimpulan8" class="kes8list"></div>
+      </div>
     </div>
     <div class="kandidat" style="margin-top:14px;">
-      <div class="lbl">Kesimpulan · 8 Digit Terbaik per Posisi (A=Ribuan, C=Ratusan, K=Puluhan, E=Satuan)</div>
-      <p class="hint" style="margin:0 0 8px;">Satu baris per mode — tiap posisi berisi 8 digit dengan persentase tertinggi.</p>
-      <div id="kesimpulan8" class="kes8list"></div>
-      <div class="lbl" style="margin-top:12px;">TOP · Irisan Mode per Posisi</div>
+      <div class="lbl" style="margin-top:0;">TOP · Irisan Mode per Posisi</div>
       <p class="hint" style="margin:0 0 8px;">Pilih mode yang mau diikutkan dalam irisan. TOP 1 = ada di semua mode terpilih, TOP 2 = ada di (jumlah mode terpilih − 1), TOP 3 = sisanya.</p>
-      <div class="row" style="margin-top:0;">
+      <div style="display:grid; grid-template-columns:1fr 1fr auto; gap:8px; align-items:center;">
         <label class="chk"><input type="checkbox" id="modeChkNormal" checked> NORMAL</label>
         <label class="chk"><input type="checkbox" id="modeChkMistikLama" checked> MISTIK LAMA</label>
+        <input type="text" id="modeCountInput" inputmode="numeric" value="7" placeholder="Jumlah" style="grid-column:3; grid-row:1; width:100%; min-width:0; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:13px; padding:9px 8px; border-radius:9px;">
         <label class="chk"><input type="checkbox" id="modeChkMistikBaru" checked> MISTIK BARU</label>
         <label class="chk"><input type="checkbox" id="modeChkIndex" checked> INDEX</label>
+        <button class="btn primary" id="modeCountGoBtn" style="grid-column:3; grid-row:2; width:100%;">GO</button>
       </div>
+      <p class="hint" id="modeCountFeedback" style="margin:6px 0 0; min-height:14px;"></p>
       <div id="topGabungan" class="toplist" style="margin-top:10px;"></div>
       <div class="lbl" style="margin-top:10px;">Pakai ke Generator</div>
       <div class="row" style="margin-top:6px;">
@@ -425,7 +437,9 @@
     </div>
     <div class="row" style="margin-top:6px;">
       <button class="btn" id="filterCopyBtn">Salin</button>
+      <button class="btn" id="filterShareBtn">🔗 Bagikan Link</button>
     </div>
+    <p class="hint" id="filterShareFeedback" style="margin:6px 0 0; min-height:14px;"></p>
   </div>
 
   <div class="card">
@@ -442,11 +456,12 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 let lastAnalysis = null; // { targetLen, posNames, transitionWeights, lastDigits, globalStats }
+let modeDataCount = 7; // default: AT dihitung dari 7 data terbaru. null/kosong via GO = pakai semua data.
+let lastBacktestResults = null; // { normal, mistikLama, mistikBaru, index } — hasil computeBacktestForMode tiap mode
 let lastHistoryNumbers = []; // data historis yang dipakai untuk filter "buang yang sudah keluar"
 let lastModeResults = null; // { normal, mistikLama, mistikBaru, index } — hasil computeModeAnalysis tiap mode
 let lastPosLabels = null; // ['A','C','K','E'] dst — dipakai ulang saat checkbox mode TOP berubah
 let topTierSelection = {}; // key `${posIdx}_${tier}` -> boolean, status checkbox Top 1/2/3 per posisi
-
 // ---------- Tabel kode Mistik Lama / Mistik Baru / Index ----------
 const DIGIT_MAPS = {
   normal: null,
@@ -463,6 +478,25 @@ function applyDigitMap(numStr, map){
 }
 
 // Hitung perilaku naik/turun/tetap + peluang digit berikutnya untuk SATU mode (NORMAL/MISTIK LAMA/MISTIK BARU/INDEX)
+// ---------- Uji akurasi (backtest) AT: geser jendela N-data dari data terlama ke terbaru, cek apakah A/C/K/E berikutnya masuk pool AT ----------
+function computeBacktestForMode(usedAll, targetLen, map, controlN){
+  const chrono = usedAll.slice().reverse(); // urut lama -> baru
+  if(!controlN || controlN <= 0 || chrono.length <= controlN) return { total: 0, success: 0, fail: 0 };
+  let success = 0, fail = 0;
+  for(let start = 0; start <= chrono.length - controlN - 1; start++){
+    const windowChrono = chrono.slice(start, start + controlN);
+    const target = chrono[start + controlN];
+    const windowNewestFirst = windowChrono.slice().reverse();
+    const r = computeModeAnalysis(windowNewestFirst, targetLen, map);
+    let ok = true;
+    for(let p = 0; p < targetLen; p++){
+      if(!r.top8Pools[p].includes(target[p])){ ok = false; break; }
+    }
+    if(ok) success++; else fail++;
+  }
+  return { total: success + fail, success, fail };
+}
+
 function computeModeAnalysis(used, targetLen, map){
   const mapped = used.map(n => applyDigitMap(n, map));
   const chrono = mapped.slice().reverse(); // terlama -> terbaru
@@ -608,7 +642,7 @@ function useTopInGenerator(){
 }
 document.getElementById('pakaiTopBtn').addEventListener('click', useTopInGenerator);
 
-function renderMergedModeTable(modeResults, posLabels){
+function renderMergedModeTable(modeResults, posLabels, backtestResults, controlN){
   function colorFor(t){
     const r = Math.round(157 + t * (79 - 157));
     const g = Math.round(179 + t * (184 - 179));
@@ -618,6 +652,10 @@ function renderMergedModeTable(modeResults, posLabels){
   let bodyRows = '';
   MODE_ORDER.forEach((key, gi) => {
     const r = modeResults[key];
+    const bt = backtestResults ? backtestResults[key] : null;
+    const btLine = bt && bt.total > 0
+      ? `Uji akurasi (kontrol ${controlN}): ${bt.total}x — sukses ${bt.success}x, gagal ${bt.fail}x`
+      : `Uji akurasi (kontrol ${controlN}): data belum cukup`;
     const grpClass = gi % 2 === 0 ? 'grp-a' : 'grp-b';
     r.rankedPerPos.forEach((ranked, idx) => {
       const top8 = ranked.filter(x => x.pct > 0).slice(0, 8);
@@ -630,13 +668,13 @@ function renderMergedModeTable(modeResults, posLabels){
       }).join('');
       bodyRows += `<tr class="${grpClass}">`;
       if(idx === 0){
-        bodyRows += `<td class="modecell" rowspan="${r.rankedPerPos.length}"><div>${MODE_LABELS[key]}</div><div class="modemini2">Naik ${r.globalStats.naikPct.toFixed(0)}% · Tetap ${r.globalStats.tetapPct.toFixed(0)}% · Turun ${r.globalStats.turunPct.toFixed(0)}%</div></td>`;
+        bodyRows += `<td class="modecell" rowspan="${r.rankedPerPos.length}"><div>${MODE_LABELS[key]}</div><div class="modemini2">Naik ${r.globalStats.naikPct.toFixed(0)}% · Tetap ${r.globalStats.tetapPct.toFixed(0)}% · Turun ${r.globalStats.turunPct.toFixed(0)}%</div><div class="modemini3">${btLine}</div></td>`;
       }
       bodyRows += `<td>${posLabels[idx] || ('P' + (idx+1))}</td><td>${r.lastDigits[idx]}</td><td class="digitstr">${str}</td><td>${(top8[0] ? top8[0].pct : 0).toFixed(1)}%</td></tr>`;
     });
   });
   return `<table class="modetable modetable-merged">
-    <thead><tr><th>Mode</th><th>Pos</th><th>Trkhr</th><th>8 Digit Terbaik</th><th>%</th></tr></thead>
+    <thead><tr><th>Mode</th><th>Pos</th><th>Trkhr</th><th>AT</th><th>%</th></tr></thead>
     <tbody>${bodyRows}</tbody>
   </table>`;
 }
@@ -669,6 +707,50 @@ function pickTargetLength(tokens){
   }
   return best || 4;
 }
+
+function pad2(n){ return String(n).padStart(2, '0'); }
+function todayDateStr(){
+  const d = new Date();
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
+document.getElementById('quickInputBtn').addEventListener('click', () => {
+  const feedback = document.getElementById('quickInputFeedback');
+  const digitsInput = document.getElementById('quickInputDigits');
+  const digits = digitsInput.value.replace(/[^0-9]/g, '');
+  if(digits.length < 4 || digits.length > 5){
+    feedback.style.color = 'var(--rose)';
+    feedback.textContent = 'Isi 4 atau 5 digit angka dulu.';
+    return;
+  }
+  const ta = document.getElementById('dataInput');
+  const raw = ta.value;
+  const firstLine = raw.split('\n').find(l => l.trim().length > 0) || '';
+  const cols = firstLine.trim().split(/\t+| {2,}/).filter(c => c.trim().length > 0);
+  const today = todayDateStr();
+  let newLine;
+  if(cols.length >= 3){
+    // format lama: Tanggal - Kode-Nomor - Angka. Ambil kolom kode (sebelum kolom angka terakhir),
+    // lalu naikkan nomor urut di belakangnya +1 (mis. "TTM 22:00-594" -> "TTM 22:00-595").
+    const codeCol = cols[cols.length - 2];
+    const m = codeCol.match(/^(.*-)(\d+)$/);
+    if(m){
+      const nextNum = String(parseInt(m[2], 10) + 1).padStart(m[2].length, '0');
+      newLine = `${today}\t${m[1]}${nextNum}\t${digits}`;
+    } else {
+      newLine = `${today}\t${codeCol}\t${digits}`;
+    }
+  } else {
+    // belum ada pola kode yang bisa dideteksi — tetap tambahkan dengan tanggal + angka saja
+    newLine = `${today}\t${digits}`;
+  }
+  ta.value = raw.trim().length ? (newLine + '\n' + raw) : newLine;
+  digitsInput.value = '';
+  feedback.style.color = 'var(--teal)';
+  feedback.textContent = `Ditambahkan: ${newLine.replace(/\t/g, '  ')} ✓`;
+  analyze();
+  setTimeout(() => { feedback.textContent = ''; }, 3500);
+});
 
 function analyze(){
   const raw = document.getElementById('dataInput').value;
@@ -703,16 +785,26 @@ function analyze(){
       : ['K','E'];
 
   // ---------- Hitung 4 mode: NORMAL, MISTIK LAMA, MISTIK BARU, INDEX ----------
+  // modeDataCount: null/0/lebih besar dari data yang ada = pakai semua; kalau diisi via GO, hanya N data terbaru (paling atas) yang dipakai.
+  const modeUsed = (modeDataCount && modeDataCount > 0 && modeDataCount < used.length)
+    ? used.slice(0, modeDataCount)
+    : used;
   const modeResults = {};
-  MODE_ORDER.forEach(key => { modeResults[key] = computeModeAnalysis(used, targetLen, DIGIT_MAPS[key]); });
+  MODE_ORDER.forEach(key => { modeResults[key] = computeModeAnalysis(modeUsed, targetLen, DIGIT_MAPS[key]); });
   lastModeResults = modeResults;
 
-  const container = document.getElementById('posCols');
-  container.innerHTML = renderMergedModeTable(modeResults, posLabels);
+  const backtestResults = {};
+  MODE_ORDER.forEach(key => { backtestResults[key] = computeBacktestForMode(used, targetLen, DIGIT_MAPS[key], modeUsed.length); });
+  lastBacktestResults = backtestResults;
 
-  document.getElementById('posCopyArea').value = MODE_ORDER
-    .map(key => `${MODE_LABELS[key]}: ${modeResults[key].kandidatUtama}`)
-    .join(' | ');
+  const container = document.getElementById('posCols');
+  container.innerHTML = renderMergedModeTable(modeResults, posLabels, backtestResults, modeUsed.length);
+
+  const modeCountFeedback = document.getElementById('modeCountFeedback');
+  modeCountFeedback.style.color = 'var(--teal)';
+  modeCountFeedback.textContent = (modeUsed.length === used.length)
+    ? `Memakai semua data (${used.length}).`
+    : `Memakai ${modeUsed.length} data terbaru dari total ${used.length}.`;
   document.getElementById('resultCard').style.display = 'block';
 
   // ---------- Kesimpulan: per mode, 8 digit terbaik tiap posisi, 1 list ringkas ----------
@@ -1080,14 +1172,29 @@ document.getElementById('combineCopyBtn').addEventListener('click', () => {
   });
 });
 
-document.getElementById('posCopyBtn').addEventListener('click', () => {
-  const ta = document.getElementById('posCopyArea');
-  navigator.clipboard.writeText(ta.value).then(() => {
-    const btn = document.getElementById('posCopyBtn');
-    const original = btn.textContent;
-    btn.textContent = 'Tersalin ✓';
-    setTimeout(() => btn.textContent = original, 1400);
-  }).catch(() => { ta.select(); document.execCommand('copy'); });
+document.getElementById('togglePosBtn').addEventListener('click', () => {
+  const wrap = document.getElementById('posKesimpulanWrap');
+  const btn = document.getElementById('togglePosBtn');
+  const isHidden = wrap.style.display === 'none';
+  wrap.style.display = isHidden ? 'block' : 'none';
+  btn.textContent = isHidden ? '👁 Sembunyikan Tabel & Kesimpulan' : '👁 Tampilkan Tabel & Kesimpulan';
+});
+
+document.getElementById('modeCountGoBtn').addEventListener('click', () => {
+  const feedback = document.getElementById('modeCountFeedback');
+  const val = document.getElementById('modeCountInput').value.trim();
+  if(val === ''){
+    modeDataCount = null;
+  } else {
+    const n = parseInt(val.replace(/[^0-9]/g, ''), 10);
+    if(!Number.isFinite(n) || n <= 0){
+      feedback.style.color = 'var(--rose)';
+      feedback.textContent = 'Isi angka lebih dari 0, atau kosongkan untuk pakai semua data.';
+      return;
+    }
+    modeDataCount = n;
+  }
+  analyze();
 });
 
 function isNoTwin(num){
@@ -1234,6 +1341,97 @@ function resetFilters(){
 
 document.getElementById('applyFilterBtn').addEventListener('click', applyFilters);
 document.getElementById('resetFilterBtn').addEventListener('click', resetFilters);
+
+// ---------- Bagikan Link (data + pool generator + opsi filter, tidak berubah saat dibuka lagi) ----------
+function collectShareState(){
+  return {
+    data: document.getElementById('dataInput').value,
+    pools: lastTop8Pools,
+    f: {
+      noTwin: document.getElementById('filterNoTwin').checked,
+      excludeHistory: document.getElementById('filterExcludeHistory').checked,
+      cb: document.getElementById('filterCB').value,
+      ai: document.getElementById('filterAI').value,
+      jumlah: document.getElementById('filterJumlah').value,
+      selisih: document.getElementById('filterSelisih').value,
+      twinPairs: getSelectedTwinMurniPairs(),
+      shio: [...document.querySelectorAll('.shioPick:checked')].map(el => el.dataset.shio)
+    }
+  };
+}
+
+function buildShareLink(){
+  const json = JSON.stringify(collectShareState());
+  const encoded = btoa(unescape(encodeURIComponent(json)));
+  const url = new URL(window.location.href);
+  url.hash = 'share=' + encoded;
+  return url.toString();
+}
+
+function restoreFromShareLink(){
+  const match = (window.location.hash || '').match(/share=([^&]+)/);
+  if(!match) return false;
+  try{
+    const json = decodeURIComponent(escape(atob(match[1])));
+    const state = JSON.parse(json);
+    document.getElementById('dataInput').value = state.data || '';
+    analyze();
+    if(Array.isArray(state.pools) && state.pools.length) lastTop8Pools = state.pools;
+    const f = state.f || {};
+    document.getElementById('filterNoTwin').checked = !!f.noTwin;
+    document.getElementById('filterExcludeHistory').checked = !!f.excludeHistory;
+    document.getElementById('filterCB').value = f.cb || '';
+    document.getElementById('filterAI').value = f.ai || '';
+    document.getElementById('filterJumlah').value = f.jumlah || '';
+    document.getElementById('filterSelisih').value = f.selisih || '';
+    (f.twinPairs || []).forEach(([i, j]) => {
+      const cb = document.querySelector(`.twinMurniPick[data-i="${i}"][data-j="${j}"]`);
+      if(cb) cb.checked = true;
+    });
+    const twinAll = document.querySelectorAll('.twinMurniPick').length;
+    const twinChecked = document.querySelectorAll('.twinMurniPick:checked').length;
+    document.getElementById('filterTwinMurniAll').checked = (twinAll === twinChecked && twinAll > 0);
+    (f.shio || []).forEach(s => {
+      const cb = document.querySelector(`.shioPick[data-shio="${s}"]`);
+      if(cb) cb.checked = true;
+    });
+    const shioAll = document.querySelectorAll('.shioPick').length;
+    const shioChecked = document.querySelectorAll('.shioPick:checked').length;
+    document.getElementById('filterShioAll').checked = (shioAll === shioChecked && shioAll > 0);
+    updateShioPickNote();
+    applyFilters();
+    const filterCard = document.getElementById('filterCard');
+    if(filterCard) filterCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return true;
+  }catch(e){
+    console.error('Gagal memulihkan link berbagi:', e);
+    return false;
+  }
+}
+
+document.getElementById('filterShareBtn').addEventListener('click', () => {
+  const feedback = document.getElementById('filterShareFeedback');
+  if(!lastTop8Pools.length){
+    feedback.style.color = 'var(--rose)';
+    feedback.textContent = 'Belum ada hasil untuk dibagikan — isi data & terapkan filter dulu.';
+    return;
+  }
+  const link = buildShareLink();
+  const done = () => {
+    feedback.style.color = 'var(--teal)';
+    feedback.textContent = 'Link Tersalin ✓';
+    setTimeout(() => { feedback.textContent = ''; }, 3000);
+  };
+  navigator.clipboard.writeText(link).then(done).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = link;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    done();
+  });
+});
 document.getElementById('filterCopyBtn').addEventListener('click', () => {
   const text = document.getElementById('filterOut').value;
   navigator.clipboard.writeText(text).then(() => {
@@ -1326,6 +1524,10 @@ function getSavedEntries(){
   return savedEntriesCache;
 }
 
+function getSortedEntries(){
+  return getSavedEntries().slice().sort((a, b) => a.name.localeCompare(b.name, 'id', { sensitivity: 'base' }));
+}
+
 function setSavedEntries(list){
   savedEntriesCache = list;
   cacheToLocalStorage(list);
@@ -1342,7 +1544,7 @@ function setSavedEntries(list){
 }
 
 function updateSavedMeta(){
-  const entries = getSavedEntries();
+  const entries = getSortedEntries();
   const select = document.getElementById('savedSelect');
   const metaLine = document.getElementById('savedMetaLine');
   const entry = entries[select.selectedIndex];
@@ -1352,7 +1554,7 @@ function updateSavedMeta(){
 }
 
 function renderSavedList(){
-  const entries = getSavedEntries();
+  const entries = getSortedEntries();
   const select = document.getElementById('savedSelect');
   const emptyNote = document.getElementById('savedEmptyNote');
   const selectWrap = document.getElementById('savedSelectWrap');
@@ -1382,7 +1584,7 @@ function renderSavedList(){
 document.getElementById('savedSelect').addEventListener('change', updateSavedMeta);
 
 document.getElementById('savedLoadBtn').addEventListener('click', () => {
-  const entries = getSavedEntries();
+  const entries = getSortedEntries();
   const entry = entries[document.getElementById('savedSelect').selectedIndex];
   if(!entry) return;
   document.getElementById('dataInput').value = entry.data;
@@ -1391,13 +1593,15 @@ document.getElementById('savedLoadBtn').addEventListener('click', () => {
 });
 
 document.getElementById('savedDelBtn').addEventListener('click', () => {
-  const entries = getSavedEntries();
+  const entries = getSortedEntries();
   const idx = document.getElementById('savedSelect').selectedIndex;
   const entry = entries[idx];
   if(!entry) return;
   if(!checkSecurityCode(`menghapus data "${entry.name}"`)) return;
-  const updated = entries.slice();
-  updated.splice(idx, 1);
+  const updated = getSavedEntries().slice();
+  const originalIdx = updated.findIndex(e => e.name === entry.name);
+  if(originalIdx < 0) return;
+  updated.splice(originalIdx, 1);
   setSavedEntries(updated);
   renderSavedList();
 });
@@ -1475,8 +1679,9 @@ setTimeout(() => {
   }
 }, 8000);
 
-// tampilan awal dikosongkan — tunggu user tempel data sendiri
+// tampilan awal dikosongkan — tunggu user tempel data sendiri, kecuali ada link bagikan di URL
 window.addEventListener('DOMContentLoaded', () => {
+  if(restoreFromShareLink()) return;
   document.getElementById('dataInput').value = '';
   analyze();
 });
