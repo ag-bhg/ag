@@ -518,6 +518,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check-compat.js"></script>
 <script>
 let lastHistoryNumbers = []; // data historis yang dipakai untuk filter "buang yang sudah keluar" (newest-first)
 let lastPosLabels = null; // ['A','C','K','E'] dst — dipakai ulang saat Formula X dihitung ulang
@@ -1759,6 +1760,14 @@ let db = null;
 let authReadyPromise = Promise.resolve(false);
 try{
   firebase.initializeApp(firebaseConfig);
+
+  // App Check: pastikan hanya request dari app resmi ini yang diterima Firebase.
+  // GANTI 'TEMPEL_SITE_KEY_DI_SINI' dengan Site Key dari reCAPTCHA Admin Console.
+  firebase.appCheck().activate(
+    '6Lc3f48tAAAAAJwdUnKibs6HSj96NGKWDqdhPYPQ',
+    true // isTokenAutoRefreshEnabled
+  );
+
   db = firebase.database();
   // Anonymous sign-in: tanpa ini, Rules ".read/.write": "auth != null" akan menolak
   // permintaan tanpa login — termasuk bot yang mencoba akses langsung tanpa lewat app ini.
