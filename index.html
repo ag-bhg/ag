@@ -163,6 +163,30 @@
 
   footer{text-align:center; color:var(--ink-dim); font-size:11px; margin-top:20px;}
 
+  .genFrame-blue{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px; margin-top:4px;
+  }
+  .genFrame-blue input{
+    width:100%; background:var(--panel); color:var(--amber); border:1px solid var(--line); border-radius:8px;
+    padding:12px 14px; font-family:var(--mono); font-size:12.5px; text-align:center; font-weight:700;
+    letter-spacing:.02em; box-sizing:border-box;
+  }
+  .genFrame-black{
+    margin:14px auto 0; width:35%; max-width:150px;
+  }
+  .genFrame-black button{
+    width:100%; background:var(--amber); color:#241705; border:1px solid var(--amber); border-radius:9px;
+    padding:11px; font-weight:800; letter-spacing:.1em; cursor:pointer; font-size:13px; font-family:var(--sans);
+  }
+  .genFrame-black button:active{transform:scale(.97);}
+  .genFrame-orange{
+    border:1px solid var(--teal); border-radius:10px; background:var(--panel-2); padding:14px; margin-top:16px;
+  }
+  .genFrame-orange textarea{
+    width:100%; min-height:180px; border:none; background:transparent; color:var(--ink);
+    font-family:var(--mono); font-size:13px; resize:vertical; outline:none; box-sizing:border-box;
+  }
+
   .modeblock{margin-bottom:10px;}
   .modehead{
     display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 10px;
@@ -422,26 +446,26 @@
   </div>
 
   <div class="card" id="bulkCard" style="display:none;">
-    <div class="sectionToggle" id="genToggle">Generator Acak (8 Kandidat Perilaku Perubahan) <span class="toggleIcon" id="genToggleIcon">▸</span></div>
+    <div class="sectionToggle" id="genToggle">Generator <span class="toggleIcon" id="genToggleIcon">▸</span></div>
     <div id="genWrap" style="display:none;">
-      <p class="hint" style="margin-top:0;">Diambil otomatis dari 8 digit dengan peluang tertinggi hasil analisis perilaku perubahan tiap posisi — tidak ada input manual, hasil selalu mengikuti data terakhir yang dianalisis.</p>
-      <textarea id="bulkOut" readonly style="margin-top:4px;"></textarea>
-      <div class="row">
-        <button class="btn" id="bulkCopyBtn">Salin</button>
-      </div>
-    </div>
+      <p class="hint" style="margin-top:0; text-align:center;">Otomatis terisi dari Formula X/Top Posisi, atau ketik manual — pisahkan tiap posisi pakai titik (.). Jumlah posisi mengikuti jumlah segmen: 2 segmen = 2D, 3 segmen = 3D, 4 segmen = 4D.</p>
 
-    <div class="sectionToggle" id="komboToggle" style="margin-top:18px;">Kombinasi Acak (dari 8 Kandidat) <span class="toggleIcon" id="komboToggleIcon">▸</span></div>
-    <div id="komboWrap" style="display:none;">
-      <p class="hint" style="margin-top:0;">Tiap digit posisi diambil dari 8 kandidat teratas — <b>semua kombinasi yang mungkin ditampilkan</b> (tidak dibatasi), digabung jadi angka penuh dengan urutan baku sesuai peringkat data (bukan acak), mis. <b>0036*1147*6149</b> dan seterusnya. Otomatis tereksekusi, kolom hasil bisa diedit manual kalau perlu.</p>
-      <div class="row">
-        <button class="btn primary" id="combineGenBtn">🔁 Generate Kombinasi</button>
+      <div class="genFrame-blue">
+        <input type="text" id="bulkOut" placeholder="mis. 12345678.98765432.01234567.11223344 (4D)">
       </div>
-      <textarea id="combineOut" style="margin-top:10px;" placeholder="Terisi otomatis setelah Hitung Frekuensi..."></textarea>
-      <div class="stats" style="margin-top:10px;">
+
+      <div class="genFrame-black">
+        <button id="combineGenBtn">GENERATE</button>
+      </div>
+
+      <div class="genFrame-orange">
+        <textarea id="combineOut" placeholder="Terisi otomatis setelah Hitung Frekuensi..."></textarea>
+      </div>
+
+      <div class="stats" style="margin-top:10px; justify-content:center;">
         <div class="stat"><div class="n" id="combineCountOut">0</div><div class="l">Angka dihasilkan</div></div>
       </div>
-      <div class="row" style="margin-top:6px;">
+      <div class="row" style="margin-top:6px; justify-content:center;">
         <button class="btn" id="combineCopyBtn">Salin</button>
       </div>
     </div>
@@ -485,7 +509,7 @@
       <div style="width:100%;">
         <label style="display:block; font-size:11px; color:var(--ink-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.06em;">Filter Twin Murni (tepat 2 posisi sama, posisi lain wajib beda)</label>
         <div class="row" id="twinMurniGroup">
-          <label class="chk"><input type="checkbox" id="filterTwinMurniAll"> Pilih Semua</label>
+          <label class="chk"><input type="checkbox" id="filterHapus34"> Hapus 3-4</label>
         </div>
       </div>
     </div>
@@ -951,7 +975,6 @@ setupSectionToggle('jsToggle', 'jsWrap', 'jsToggleIcon');
 setupSectionToggle('cbToggle', 'cbWrap', 'cbToggleIcon');
 setupSectionToggle('shioToggle', 'shioWrap', 'shioToggleIcon');
 setupSectionToggle('genToggle', 'genWrap', 'genToggleIcon');
-setupSectionToggle('komboToggle', 'komboWrap', 'komboToggleIcon');
 
 
 // Isi Generator & Kombinasi Acak pakai varian Formula X yang dipilih (radio) tiap posisi
@@ -976,7 +999,7 @@ function fxApplyToGenerator(){
   }
 
   lastTop8Pools = pools;
-  document.getElementById('bulkOut').value = pools.map(p => p.join('')).join(' x ');
+  document.getElementById('bulkOut').value = pools.map(p => p.join('')).join('.');
   generateCombineOutput();
   if(document.getElementById('filterCard').style.display === 'block') resetFilters();
 }
@@ -1001,7 +1024,7 @@ function applyTopPosisiToGenerator(){
   }
 
   lastTop8Pools = pools;
-  document.getElementById('bulkOut').value = pools.map(p => p.join('')).join(' x ');
+  document.getElementById('bulkOut').value = pools.map(p => p.join('')).join('.');
   generateCombineOutput();
   if(document.getElementById('filterCard').style.display === 'block') resetFilters();
 }
@@ -1440,8 +1463,23 @@ function cartesianProduct(pools){
 }
 
 function generateCombineOutput(){
-  if(!lastTop8Pools.length) return;
-  const results = cartesianProduct(lastTop8Pools); // urutan baku sesuai peringkat kandidat, tidak diacak
+  const raw = document.getElementById('bulkOut').value.trim();
+  if(!raw){ alert('Isi dulu kotak pool digit (bisa otomatis dari Formula X/Top Posisi, atau ketik manual dipisah titik).'); return; }
+
+  const segments = raw.split('.').map(s => s.trim()).filter(s => s.length > 0);
+  if(segments.length < 2){
+    alert('Format tidak valid — pisahkan tiap posisi pakai titik (.), mis. 12345678.98765432 untuk 2D.');
+    return;
+  }
+  if(segments.some(s => !/^[0-9]+$/.test(s))){
+    alert('Tiap posisi hanya boleh berisi digit 0-9, dipisah titik (.).');
+    return;
+  }
+
+  const pools = segments.map(s => s.split(''));
+  lastTop8Pools = pools; // jadi sumber untuk filter panel & regenerasi berikutnya juga
+
+  const results = cartesianProduct(pools); // urutan baku sesuai peringkat kandidat, tidak diacak
   document.getElementById('combineOut').value = results.join('*') + '*';
   document.getElementById('combineCountOut').textContent = results.length;
 }
@@ -1502,18 +1540,15 @@ function renderTwinMurniCheckboxes(len){
     label.innerHTML = `<input type="checkbox" class="twinMurniPick" data-i="${i}" data-j="${j}"> ${name}`;
     group.appendChild(label);
   });
-  group.querySelectorAll('.twinMurniPick').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const all = document.querySelectorAll('.twinMurniPick').length;
-      const checked = document.querySelectorAll('.twinMurniPick:checked').length;
-      document.getElementById('filterTwinMurniAll').checked = (all === checked && all > 0);
-    });
-  });
 }
 
-document.getElementById('filterTwinMurniAll').addEventListener('change', e => {
-  document.querySelectorAll('.twinMurniPick').forEach(cb => cb.checked = e.target.checked);
-});
+// Hapus 3-4: buang angka yang punya digit muncul 3x atau lebih (mencakup AAAB/AABA/ABAA/BAAA/AAAA sekaligus,
+// karena semua pola itu punya satu digit yang muncul minimal 3 kali).
+function hasTripleOrMore(numStr){
+  const counts = {};
+  for(const d of numStr){ counts[d] = (counts[d] || 0) + 1; }
+  return Object.values(counts).some(c => c >= 3);
+}
 
 function getSelectedTwinMurniPairs(){
   return [...document.querySelectorAll('.twinMurniPick:checked')]
@@ -1534,6 +1569,7 @@ function applyFilters(){
   const source = cartesianProduct(lastTop8Pools);
 
   const noTwin = document.getElementById('filterNoTwin').checked;
+  const hapus34 = document.getElementById('filterHapus34').checked;
   const excludeHistory = document.getElementById('filterExcludeHistory').checked;
   const cb = document.getElementById('filterCB').value.replace(/[^0-9]/g, '');
   const ai = document.getElementById('filterAI').value.replace(/[^0-9]/g, '');
@@ -1543,6 +1579,7 @@ function applyFilters(){
 
   let filtered = source;
   if(noTwin) filtered = filtered.filter(isNoTwin);
+  if(hapus34) filtered = filtered.filter(num => !hasTripleOrMore(num));
   if(excludeHistory) filtered = filtered.filter(num => !historySet.has(num));
   if(cb){
     // Ai 2D: cek hanya ke posisi K (puluhan) & E (satuan) = 2 digit terakhir.
@@ -1590,12 +1627,12 @@ function applyFilters(){
 
 function resetFilters(){
   document.getElementById('filterNoTwin').checked = false;
+  document.getElementById('filterHapus34').checked = false;
   document.getElementById('filterExcludeHistory').checked = false;
   document.getElementById('filterCB').value = '';
   document.getElementById('filterAI').value = '';
   document.getElementById('filterJumlah').value = '';
   document.getElementById('filterSelisih').value = '';
-  document.getElementById('filterTwinMurniAll').checked = false;
   document.querySelectorAll('.twinMurniPick').forEach(cb => cb.checked = false);
   document.getElementById('filterShioAll').checked = false;
   document.querySelectorAll('.shioPick').forEach(cb => cb.checked = false);
@@ -1613,6 +1650,7 @@ function collectShareState(){
     pools: lastTop8Pools,
     f: {
       noTwin: document.getElementById('filterNoTwin').checked,
+      hapus34: document.getElementById('filterHapus34').checked,
       excludeHistory: document.getElementById('filterExcludeHistory').checked,
       cb: document.getElementById('filterCB').value,
       ai: document.getElementById('filterAI').value,
@@ -1643,6 +1681,7 @@ function restoreFromShareLink(){
     if(Array.isArray(state.pools) && state.pools.length) lastTop8Pools = state.pools;
     const f = state.f || {};
     document.getElementById('filterNoTwin').checked = !!f.noTwin;
+    document.getElementById('filterHapus34').checked = !!f.hapus34;
     document.getElementById('filterExcludeHistory').checked = !!f.excludeHistory;
     document.getElementById('filterCB').value = f.cb || '';
     document.getElementById('filterAI').value = f.ai || '';
@@ -1652,9 +1691,6 @@ function restoreFromShareLink(){
       const cb = document.querySelector(`.twinMurniPick[data-i="${i}"][data-j="${j}"]`);
       if(cb) cb.checked = true;
     });
-    const twinAll = document.querySelectorAll('.twinMurniPick').length;
-    const twinChecked = document.querySelectorAll('.twinMurniPick:checked').length;
-    document.getElementById('filterTwinMurniAll').checked = (twinAll === twinChecked && twinAll > 0);
     (f.shio || []).forEach(s => {
       const cb = document.querySelector(`.shioPick[data-shio="${s}"]`);
       if(cb) cb.checked = true;
@@ -1709,30 +1745,34 @@ document.getElementById('filterCopyBtn').addEventListener('click', () => {
   });
 });
 
-document.getElementById('bulkCopyBtn').addEventListener('click', () => {
-  const text = document.getElementById('bulkOut').value;
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = document.getElementById('bulkCopyBtn');
-    const original = btn.textContent;
-    btn.textContent = 'Tersalin ✓';
-    setTimeout(() => btn.textContent = original, 1400);
-  }).catch(() => {
-    const ta = document.getElementById('bulkOut');
-    ta.select(); document.execCommand('copy');
-  });
-});
+function resetAllSettings(){
+  // Formula X & Top Posisi: kosongkan pilihan supaya balik ke rekomendasi teratas (default) saat dihitung ulang.
+  FX_SELECTED = {};
+  TOP_POSISI_SELECTED = {};
+  // Jendela Tren N & Kontrol N balik ke nilai standar.
+  const trendSel = document.getElementById('fxTrendN');
+  const controlSel = document.getElementById('fxControlN');
+  if(trendSel) trendSel.value = '10';
+  if(controlSel) controlSel.value = '7';
+  // Panel filter (Tanpa Kembar, Buang Riwayat, CB, AI, Jumlah, Selisih, Twin Murni, Shio) — resetFilters()
+  // sudah dipanggil otomatis di akhir analyze(), jadi tidak perlu diulang di sini.
+}
 
 document.getElementById('analyzeBtn').addEventListener('click', analyze);
 
 // ---------- Kode Keamanan (proteksi ringan untuk Simpan & Hapus) ----------
 const SECURITY_CODE = '321';
+const SECURITY_SESSION_KEY = 'analisaFrekuensi_sesiTerverifikasi';
 function checkSecurityCode(actionLabel){
+  // Kalau sudah pernah verifikasi kode di sesi (tab) ini, tidak perlu tanya lagi.
+  if(sessionStorage.getItem(SECURITY_SESSION_KEY) === 'true') return true;
   const input = prompt(`Masukkan kode keamanan untuk ${actionLabel}:`);
   if(input === null) return false; // dibatalkan
   if(input !== SECURITY_CODE){
     alert('Kode salah. Aksi dibatalkan.');
     return false;
   }
+  try{ sessionStorage.setItem(SECURITY_SESSION_KEY, 'true'); }catch(e){ /* sessionStorage diblokir — tetap lanjut, hanya tidak diingat */ }
   return true;
 }
 
@@ -1861,6 +1901,7 @@ document.getElementById('savedLoadBtn').addEventListener('click', () => {
   if(!entry) return;
   document.getElementById('dataInput').value = entry.data;
   document.getElementById('saveNameInput').value = entry.name;
+  resetAllSettings();
   analyze();
 });
 
@@ -1870,6 +1911,7 @@ document.getElementById('savedDelBtn').addEventListener('click', () => {
   const entry = entries[idx];
   if(!entry) return;
   if(!checkSecurityCode(`menghapus data "${entry.name}"`)) return;
+  if(!confirm(`Yakin ingin menghapus data "${entry.name}"? Aksi ini tidak bisa dibatalkan.`)) return;
   const updated = getSavedEntries().slice();
   const originalIdx = updated.findIndex(e => e.name === entry.name);
   if(originalIdx < 0) return;
@@ -1890,8 +1932,12 @@ document.getElementById('saveDataBtn').addEventListener('click', () => {
   const entries = getSavedEntries().slice();
   const nameInput = document.getElementById('saveNameInput');
   const trimmed = nameInput.value.trim() || `Data ${entries.length + 1}`;
-  const savedAt = new Date().toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const existingIdx = entries.findIndex(e => e.name === trimmed);
+  const confirmMsg = existingIdx >= 0
+    ? `Data "${trimmed}" sudah ada. Timpa dengan data baru ini?`
+    : `Simpan data ini sebagai "${trimmed}"?`;
+  if(!confirm(confirmMsg)) return;
+  const savedAt = new Date().toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const newEntry = { name: trimmed, data, savedAt };
   if(existingIdx >= 0){ entries[existingIdx] = newEntry; } else { entries.push(newEntry); }
   setSavedEntries(entries);
