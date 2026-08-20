@@ -38,8 +38,8 @@
     padding:16px; margin-bottom:14px;
   }
   .card h2{
-    font-size:11px; text-transform:uppercase; letter-spacing:.1em;
-    color:var(--ink-dim); margin:0 0 12px; font-weight:600;
+    font-size:15px; text-transform:uppercase; letter-spacing:.1em;
+    color:var(--ink-dim); margin:0 0 12px; font-weight:700;
   }
 
   textarea{
@@ -226,20 +226,29 @@
 
   .fxGrid{display:grid; grid-template-columns:repeat(2, 1fr); gap:10px;}
   .fxCol{background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:12px; min-width:0;}
-  .fxCol h3{margin:0 0 8px; font-size:12px; color:var(--amber); text-transform:uppercase; letter-spacing:.06em; font-weight:700;}
-  .fxOptList{display:flex; flex-direction:column; gap:6px; max-height:260px; overflow-y:auto; padding-right:2px;}
-  .fxOpt{display:flex; align-items:center; gap:5px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; font-family:var(--mono); font-size:11px; cursor:pointer; background:var(--panel); flex-shrink:0;}
-  .fxOpt .lbl{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-  .fxOpt input[type="radio"]{accent-color:var(--teal); width:13px; height:13px; margin:0; cursor:pointer; flex-shrink:0;}
-  .fxOpt .pct{color:var(--amber); font-weight:700; margin-left:auto; white-space:nowrap; flex-shrink:0;}
-  .fxOpt.top3{border-color:var(--teal); background:rgba(79,184,163,.08);}
+  .fxCol h3{margin:0 0 12px; font-size:12px; color:var(--amber); text-transform:uppercase; letter-spacing:.06em; font-weight:800;}
+  .fxOptList{display:flex; flex-direction:column; gap:1px; max-height:126px; overflow-y:auto; padding-right:2px;}
+  .fxOpt{display:flex; align-items:center; gap:8px; padding:8px 4px; border:1.5px solid var(--line); border-radius:8px; font-family:var(--mono); font-size:10px; cursor:pointer; background:var(--panel); flex-shrink:0;}
+  .fxOpt .lbl{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600;}
+  .fxOpt input[type="radio"]{accent-color:var(--teal); width:12px; height:12px; margin:0; cursor:pointer; flex-shrink:0;}
+  .fxOpt .pct{color:var(--amber); font-weight:800; margin-left:auto; white-space:nowrap; flex-shrink:0;}
+  .fxOpt.top3{border-color:var(--teal); border-width:2px; background:rgba(79,184,163,.08);}
   .fxOpt.top3 .pct{color:var(--teal);}
+  .topPosOpt .lbl{font-weight:800; letter-spacing:.02em;}
+  .topPosOpt.top3 .lbl{color:var(--teal);}
+  .topPosOpt:not(.top3) .lbl{color:var(--amber);}
   .fxTrendList{display:flex; flex-direction:column; gap:6px;}
   .fxTrendRow{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px; border:1px solid var(--line); border-radius:8px; font-family:var(--mono); font-size:12px; background:var(--panel);}
   .fxTrendRow .lbl{color:var(--ink-dim); white-space:nowrap;}
   .fxTrendRow .digits{color:var(--teal); font-weight:700; letter-spacing:.03em; white-space:nowrap;}
 
-  .fxTableToggle{cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px;}
+  .sectionToggle{
+    cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px;
+    font-size:15px; text-transform:uppercase; letter-spacing:.08em;
+    font-weight:700; color:var(--amber); margin:0 0 12px;
+  }
+  .sectionToggle:hover{color:var(--teal);}
+  .sectionToggle .toggleIcon{font-size:11px; color:inherit;}
   .fxKpi{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;}
   .fxKpi div{flex:1; min-width:88px; text-align:center; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:9px 4px;}
   .fxKpi .v{font-family:var(--mono); font-size:15px; font-weight:700; color:var(--ink);}
@@ -302,7 +311,8 @@
   </div>
 
   <div class="card" id="resultCard" style="display:none;">
-    <h2>Formula X — Rekomendasi Tren per Posisi</h2>
+    <div class="sectionToggle" id="fxCardToggle">Formula X — Rekomendasi Tren per Posisi <span class="toggleIcon" id="fxCardToggleIcon">▸</span></div>
+    <div id="fxCardWrap" style="display:none;">
     <p class="hint" style="margin-top:0;">Lima formula dasar (NORMAL, MISTIK LAMA, MISTIK BARU, INDEX, BHG/Naik4Turun3) diuraikan jadi beberapa varian sumber per posisi. Tiap varian diuji akurasi trennya di data terakhir, lalu diurutkan dari yang paling akurat.</p>
     <div class="row" style="margin-top:0;">
       <label style="font-size:12px; color:var(--ink-dim);">Jendela tren N =</label>
@@ -323,32 +333,39 @@
     <p class="hint" id="fxStatus" style="margin:8px 0 0; min-height:14px;"></p>
     <div id="fxCols" style="margin-top:12px;"></div>
 
-    <div class="lbl fxTableToggle" id="fxTableToggle" style="margin-top:16px;">📊 TABEL FORMULA X <span id="fxTableToggleIcon">▸</span></div>
+    <div class="sectionToggle" id="fxTableToggle" style="margin-top:16px;">📊 TABEL FORMULA X <span class="toggleIcon" id="fxTableToggleIcon">▸</span></div>
     <p class="hint" style="margin:4px 0 0;">Klik judul di atas untuk menampilkan riwayat uji sukses/gagal (backtest) dari formula yang sedang dipilih tiap posisi.</p>
     <div id="fxTableWrap" style="display:none; margin-top:10px;">
-      <div class="fxKpi" id="fxKpiBox"></div>
       <div class="fxTableScroll">
         <table class="fxTable" id="fxBacktestTable">
           <thead><tr id="fxTableHead"></tr></thead>
           <tbody id="fxTableBody"></tbody>
         </table>
       </div>
+      <div class="fxKpi" id="fxKpiBox" style="margin-top:12px;"></div>
     </div>
 
-    <div class="lbl fxTableToggle" id="fxTrendToggle" style="margin-top:16px;">🎯 ANGKA HASIL TREN <span id="fxTrendToggleIcon">▸</span></div>
+    <div class="sectionToggle" id="fxTrendToggle" style="margin-top:16px;">🎯 ANGKA HASIL TREN <span class="toggleIcon" id="fxTrendToggleIcon">▸</span></div>
     <p class="hint" style="margin:4px 0 0;">Klik judul di atas untuk menampilkan 3 varian dengan akurasi tren tertinggi tiap posisi, sebagai pool 8 digit siap pakai.</p>
     <div id="fxTrendWrap" style="display:none; margin-top:10px;">
       <div id="fxTrendCols"></div>
 
+      <h3 style="margin:16px 0 10px; font-size:15px; color:var(--amber); text-transform:uppercase; letter-spacing:.06em; font-weight:800;">Top Posisi</h3>
+      <p class="hint" style="margin:0 0 10px;">Digabung dari 3 sumber tren teratas tiap posisi. Angka yang muncul di ketiga sumber masuk <b>Kuat</b>; sisanya masuk <b>Sedang</b>.</p>
+      <div id="topPosisiCols"></div>
+
       <div class="row" style="margin-top:12px;">
         <button class="btn primary" id="fxApplyBtn">↳ Pakai ke Generator</button>
+        <button class="btn primary" id="topPosApplyBtn">ANGKA TOP</button>
       </div>
+      <p class="hint" style="margin:6px 0 0;">Tombol <b>ANGKA TOP</b> mengisi Generator &amp; Kombinasi Acak memakai radio Kuat/Sedang yang sedang dipilih di Top Posisi tiap posisi.</p>
       <p class="hint" style="margin:6px 0 0;">Tiap kolom posisi menampilkan semua varian formula diurut berdasar akurasi tren — 3 teratas ditandai hijau/teal. Radio menentukan varian yang dipakai; default otomatis memilih yang akurasinya tertinggi. Tombol <b>Pakai ke Generator</b> mengisi ulang Generator &amp; Kombinasi Acak di bawah pakai pilihan ini.</p>
+    </div>
     </div>
   </div>
 
   <div class="card" id="jsCard" style="display:none;">
-    <h2 class="fxTableToggle" id="jsToggle" style="cursor:pointer;">Analisis Jumlah & Selisih <span id="jsToggleIcon">▸</span></h2>
+    <div class="sectionToggle" id="jsToggle">Analisis Jumlah & Selisih <span class="toggleIcon" id="jsToggleIcon">▸</span></div>
     <div id="jsWrap" style="display:none;">
       <p class="hint" style="margin-top:0;">Jumlah = total semua digit mod 10. Selisih = selisih mutlak digit pertama dan digit terakhir. Dihitung langsung dari seluruh data historis yang dipakai.</p>
       <div class="poscols" id="jsCols"></div>
@@ -362,7 +379,7 @@
       </div>
     </div>
 
-    <h2 class="fxTableToggle" id="cbToggle" style="cursor:pointer; margin-top:18px;">ANALISIS ANGKA IKUT 4D <span id="cbToggleIcon">▸</span></h2>
+    <div class="sectionToggle" id="cbToggle" style="margin-top:18px;">ANALISIS ANGKA IKUT 4D <span class="toggleIcon" id="cbToggleIcon">▸</span></div>
     <div id="cbWrap" style="display:none;">
       <p class="hint" style="margin-top:0;">Persentase dihitung dari berapa banyak data historis yang mengandung digit tersebut di posisi mana pun (bukan sekadar frekuensi mentah), jadi digit kembar dalam satu angka tidak menggelembungkan hasil.</p>
       <div id="cbCol"></div>
@@ -377,7 +394,7 @@
       </div>
     </div>
 
-    <h2 class="fxTableToggle" id="shioToggle" style="cursor:pointer; margin-top:18px;">ANALISIS SHIO 2D 4D <span id="shioToggleIcon">▸</span></h2>
+    <div class="sectionToggle" id="shioToggle" style="margin-top:18px;">ANALISIS SHIO 2D 4D <span class="toggleIcon" id="shioToggleIcon">▸</span></div>
     <div id="shioWrap" style="display:none;">
       <p class="hint" style="margin-top:0;">Dihitung dari 3 pasangan digit dalam satu angka 4D: <b>AC</b> (posisi 1-2), <b>CK</b> (posisi 2-3), <b>KE</b> (posisi 3-4, 2D asli). Tiap pasangan diubah ke angka 0-99 lalu dicari sisa bagi 12 untuk menentukan shio (sisa 0 = Shio 12). Persentase ketiga posisi dijumlahkan jadi "Total Hadir di 4D" per shio. Hanya tersedia untuk data 4 digit.</p>
       <div id="shioCol"></div>
@@ -405,24 +422,28 @@
   </div>
 
   <div class="card" id="bulkCard" style="display:none;">
-    <h2>Generator Acak (8 Kandidat Perilaku Perubahan)</h2>
-    <p class="hint" style="margin-top:0;">Diambil otomatis dari 8 digit dengan peluang tertinggi hasil analisis perilaku perubahan tiap posisi — tidak ada input manual, hasil selalu mengikuti data terakhir yang dianalisis.</p>
-    <textarea id="bulkOut" readonly style="margin-top:4px;"></textarea>
-    <div class="row">
-      <button class="btn" id="bulkCopyBtn">Salin</button>
+    <div class="sectionToggle" id="genToggle">Generator Acak (8 Kandidat Perilaku Perubahan) <span class="toggleIcon" id="genToggleIcon">▸</span></div>
+    <div id="genWrap" style="display:none;">
+      <p class="hint" style="margin-top:0;">Diambil otomatis dari 8 digit dengan peluang tertinggi hasil analisis perilaku perubahan tiap posisi — tidak ada input manual, hasil selalu mengikuti data terakhir yang dianalisis.</p>
+      <textarea id="bulkOut" readonly style="margin-top:4px;"></textarea>
+      <div class="row">
+        <button class="btn" id="bulkCopyBtn">Salin</button>
+      </div>
     </div>
 
-    <h2 style="margin-top:18px;">Kombinasi Acak (dari 8 Kandidat)</h2>
-    <p class="hint" style="margin-top:0;">Tiap digit posisi diambil dari 8 kandidat teratas — <b>semua kombinasi yang mungkin ditampilkan</b> (tidak dibatasi), digabung jadi angka penuh dengan urutan baku sesuai peringkat data (bukan acak), mis. <b>0036*1147*6149</b> dan seterusnya. Otomatis tereksekusi, kolom hasil bisa diedit manual kalau perlu.</p>
-    <div class="row">
-      <button class="btn primary" id="combineGenBtn">🔁 Generate Kombinasi</button>
-    </div>
-    <textarea id="combineOut" style="margin-top:10px;" placeholder="Terisi otomatis setelah Hitung Frekuensi..."></textarea>
-    <div class="stats" style="margin-top:10px;">
-      <div class="stat"><div class="n" id="combineCountOut">0</div><div class="l">Angka dihasilkan</div></div>
-    </div>
-    <div class="row" style="margin-top:6px;">
-      <button class="btn" id="combineCopyBtn">Salin</button>
+    <div class="sectionToggle" id="komboToggle" style="margin-top:18px;">Kombinasi Acak (dari 8 Kandidat) <span class="toggleIcon" id="komboToggleIcon">▸</span></div>
+    <div id="komboWrap" style="display:none;">
+      <p class="hint" style="margin-top:0;">Tiap digit posisi diambil dari 8 kandidat teratas — <b>semua kombinasi yang mungkin ditampilkan</b> (tidak dibatasi), digabung jadi angka penuh dengan urutan baku sesuai peringkat data (bukan acak), mis. <b>0036*1147*6149</b> dan seterusnya. Otomatis tereksekusi, kolom hasil bisa diedit manual kalau perlu.</p>
+      <div class="row">
+        <button class="btn primary" id="combineGenBtn">🔁 Generate Kombinasi</button>
+      </div>
+      <textarea id="combineOut" style="margin-top:10px;" placeholder="Terisi otomatis setelah Hitung Frekuensi..."></textarea>
+      <div class="stats" style="margin-top:10px;">
+        <div class="stat"><div class="n" id="combineCountOut">0</div><div class="l">Angka dihasilkan</div></div>
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <button class="btn" id="combineCopyBtn">Salin</button>
+      </div>
     </div>
   </div>
 
@@ -511,6 +532,7 @@ const DIGIT_MAPS = {
 // ---------- Formula X: state ----------
 let FX_RECOMMENDATIONS = null; // { posLabel: [{key,label,source,pct,hit,total}, ...] } terurut dari akurasi tertinggi
 let FX_SELECTED = {};          // posLabel -> key varian yang dipilih (radio)
+let TOP_POSISI_SELECTED = {};  // posLabel -> 'kuat' | 'sedang' (radio Top Posisi)
 let FX_FORMULAS_CACHE = null;  // { formulas, controlN } — daftar formula terakhir dipakai computeFormulaX(), dipakai ulang oleh fxApplyToGenerator()
 
 function applyDigitMap(numStr, map){
@@ -668,6 +690,7 @@ function computeFormulaX(used, posLabels){
 
   renderFormulaX(posLabels);
   renderFxTrendNumbers(posLabels, used);
+  renderTopPosisi(posLabels, used);
   renderFxBacktestTable(posLabels, used);
 
   const status = document.getElementById('fxStatus');
@@ -770,6 +793,75 @@ function renderFxTrendNumbers(posLabels, used){
   grid.appendChild(wrap);
 }
 
+// ---------- TOP POSISI: gabungan 3 sumber tren teratas -> Kuat (ada di 3-3nya) / Sedang (selebihnya) ----------
+function computeTopPosisiDigits(label, idx, used){
+  if(!FX_RECOMMENDATIONS || !FX_FORMULAS_CACHE) return { kuat: [], sedang: [] };
+  const formulaByKey = {};
+  FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
+  const top3 = (FX_RECOMMENDATIONS[label] || []).slice(0, 3);
+  const sets = top3.map(opt => {
+    const f = formulaByKey[opt.key];
+    let pool = [];
+    if(f){ try{ pool = f.fn(used)[idx] || []; }catch(e){ pool = []; } }
+    return new Set(pool);
+  });
+  const allDigits = new Set();
+  sets.forEach(s => s.forEach(d => allDigits.add(d)));
+  const sortNum = arr => arr.slice().sort((a, b) => Number(a) - Number(b));
+  const kuat = sortNum([...allDigits].filter(d => sets.length > 0 && sets.every(s => s.has(d))));
+  const sedang = sortNum([...allDigits].filter(d => !kuat.includes(d)));
+  return { kuat, sedang, hasSource: top3.length > 0 };
+}
+
+function renderTopPosisi(posLabels, used){
+  const grid = document.getElementById('topPosisiCols');
+  if(!grid) return;
+  if(!FX_RECOMMENDATIONS || !FX_FORMULAS_CACHE){ grid.innerHTML = ''; return; }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fxGrid';
+  posLabels.forEach((label, idx) => {
+    const col = document.createElement('div');
+    col.className = 'fxCol';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Top Posisi ' + label;
+    col.appendChild(h3);
+
+    const { kuat, sedang, hasSource } = computeTopPosisiDigits(label, idx, used);
+
+    const list = document.createElement('div');
+    list.className = 'fxOptList topPosList';
+
+    if(!hasSource){
+      list.innerHTML = '<p class="emptynote" style="padding:6px 0;">Data belum cukup.</p>';
+    } else {
+      [
+        { key: 'kuat', label: 'Kuat', digits: kuat.join('') },
+        { key: 'sedang', label: 'Sedang', digits: sedang.join('') }
+      ].forEach(r => {
+        const row = document.createElement('label');
+        row.className = 'fxOpt topPosOpt' + (r.key === 'kuat' ? ' top3' : '');
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'topPos_' + label;
+        radio.value = r.key;
+        radio.checked = (r.key === (TOP_POSISI_SELECTED[label] || 'kuat'));
+        radio.addEventListener('change', () => { TOP_POSISI_SELECTED[label] = r.key; });
+        row.appendChild(radio);
+        const txt = document.createElement('span');
+        txt.className = 'lbl';
+        txt.textContent = r.label + ' : ' + (r.digits || '-');
+        row.appendChild(txt);
+        list.appendChild(row);
+      });
+    }
+    col.appendChild(list);
+    wrap.appendChild(col);
+  });
+  grid.innerHTML = '';
+  grid.appendChild(wrap);
+}
+
 // ---------- TABEL FORMULA X: backtest sukses/gagal dari formula yang sedang DIPILIH (radio) tiap posisi ----------
 function renderFxBacktestTable(posLabels, used){
   const kpiBox = document.getElementById('fxKpiBox');
@@ -842,22 +934,6 @@ function renderFxBacktestTable(posLabels, used){
   }).join('');
 }
 
-document.getElementById('fxTableToggle').addEventListener('click', () => {
-  const wrap = document.getElementById('fxTableWrap');
-  const icon = document.getElementById('fxTableToggleIcon');
-  const isHidden = wrap.style.display === 'none';
-  wrap.style.display = isHidden ? 'block' : 'none';
-  icon.textContent = isHidden ? '▾' : '▸';
-});
-
-document.getElementById('fxTrendToggle').addEventListener('click', () => {
-  const wrap = document.getElementById('fxTrendWrap');
-  const icon = document.getElementById('fxTrendToggleIcon');
-  const isHidden = wrap.style.display === 'none';
-  wrap.style.display = isHidden ? 'block' : 'none';
-  icon.textContent = isHidden ? '▾' : '▸';
-});
-
 function setupSectionToggle(headId, wrapId, iconId){
   document.getElementById(headId).addEventListener('click', () => {
     const wrap = document.getElementById(wrapId);
@@ -867,9 +943,15 @@ function setupSectionToggle(headId, wrapId, iconId){
     icon.textContent = isHidden ? '▾' : '▸';
   });
 }
+setupSectionToggle('fxCardToggle', 'fxCardWrap', 'fxCardToggleIcon');
+setupSectionToggle('fxTableToggle', 'fxTableWrap', 'fxTableToggleIcon');
+setupSectionToggle('fxTrendToggle', 'fxTrendWrap', 'fxTrendToggleIcon');
 setupSectionToggle('jsToggle', 'jsWrap', 'jsToggleIcon');
 setupSectionToggle('cbToggle', 'cbWrap', 'cbToggleIcon');
 setupSectionToggle('shioToggle', 'shioWrap', 'shioToggleIcon');
+setupSectionToggle('genToggle', 'genWrap', 'genToggleIcon');
+setupSectionToggle('komboToggle', 'komboWrap', 'komboToggleIcon');
+
 
 // Isi Generator & Kombinasi Acak pakai varian Formula X yang dipilih (radio) tiap posisi
 function fxApplyToGenerator(){
@@ -898,6 +980,31 @@ function fxApplyToGenerator(){
   if(document.getElementById('filterCard').style.display === 'block') resetFilters();
 }
 document.getElementById('fxApplyBtn').addEventListener('click', fxApplyToGenerator);
+
+// Isi Generator & Kombinasi Acak pakai radio Kuat/Sedang yang dipilih di Top Posisi tiap posisi
+function applyTopPosisiToGenerator(){
+  if(!FX_FORMULAS_CACHE || !lastPosLabels || !lastHistoryNumbers.length){
+    alert('Hitung Formula X dulu (isi Data Historis lalu Hitung Frekuensi).');
+    return;
+  }
+
+  const pools = lastPosLabels.map((label, idx) => {
+    const { kuat, sedang } = computeTopPosisiDigits(label, idx, lastHistoryNumbers);
+    const pilihan = TOP_POSISI_SELECTED[label] || 'kuat';
+    return pilihan === 'sedang' ? sedang : kuat;
+  });
+
+  if(pools.some(p => !p.length)){
+    alert('Tiap posisi (' + lastPosLabels.join('/') + ') harus punya digit Top Posisi (Kuat/Sedang) yang valid — coba Hitung Ulang.');
+    return;
+  }
+
+  lastTop8Pools = pools;
+  document.getElementById('bulkOut').value = pools.map(p => p.join('')).join(' x ');
+  generateCombineOutput();
+  if(document.getElementById('filterCard').style.display === 'block') resetFilters();
+}
+document.getElementById('topPosApplyBtn').addEventListener('click', applyTopPosisiToGenerator);
 document.getElementById('fxRecalcBtn').addEventListener('click', () => {
   if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
 });
@@ -996,8 +1103,10 @@ function analyze(){
     FX_RECOMMENDATIONS = null;
     FX_SELECTED = {};
     FX_FORMULAS_CACHE = null;
+    TOP_POSISI_SELECTED = {};
     document.getElementById('fxCols').innerHTML = '';
     document.getElementById('fxTrendCols').innerHTML = '';
+    document.getElementById('topPosisiCols').innerHTML = '';
     document.getElementById('fxKpiBox').innerHTML = '';
     document.getElementById('fxTableHead').innerHTML = '';
     document.getElementById('fxTableBody').innerHTML = '';
