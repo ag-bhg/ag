@@ -61,6 +61,16 @@
   .btn.active{background:var(--teal); color:#06120f; border-color:var(--teal);}
   .btn.primary{background:var(--amber); color:#241705; border-color:var(--amber);}
   .btn:active{transform:scale(.97);}
+  .btn:disabled{opacity:.5; cursor:not-allowed; transform:none;}
+
+  .fxSpinner{
+    width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--teal);
+    border-radius:50%; display:inline-block; animation:fxSpin .7s linear infinite; vertical-align:middle;
+  }
+  @keyframes fxSpin{ to{ transform:rotate(360deg); } }
+  .fxOptLoading{
+    display:none; align-items:center; gap:8px; margin-top:8px; font-size:12.5px; color:var(--teal);
+  }
 
   .stats{display:flex; gap:18px; flex-wrap:wrap; margin-top:4px;}
   .stat .n{font-family:var(--mono); font-size:20px; font-weight:700; color:var(--teal);}
@@ -265,6 +275,8 @@
   .fxTrendRow{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px; border:1px solid var(--line); border-radius:8px; font-family:var(--mono); font-size:12px; background:var(--panel);}
   .fxTrendRow .lbl{color:var(--ink-dim); white-space:nowrap;}
   .fxTrendRow .digits{color:var(--teal); font-weight:700; letter-spacing:.03em; white-space:nowrap;}
+  .fxTrendRow.selected{border-color:var(--teal); border-width:2px; background:rgba(79,184,163,.12);}
+  .fxTrendRow.selected .lbl{color:var(--teal); font-weight:700;}
 
   .sectionToggle{
     cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px;
@@ -337,23 +349,42 @@
   <div class="card" id="resultCard" style="display:none;">
     <div class="sectionToggle" id="fxCardToggle">Formula X — Rekomendasi Tren per Posisi <span class="toggleIcon" id="fxCardToggleIcon">▸</span></div>
     <div id="fxCardWrap" style="display:none;">
-    <p class="hint" style="margin-top:0;">Lima formula dasar (NORMAL, MISTIK LAMA, MISTIK BARU, INDEX, BHG/Naik4Turun3) diuraikan jadi beberapa varian sumber per posisi. Tiap varian diuji akurasi trennya di data terakhir, lalu diurutkan dari yang paling akurat.</p>
+    <p class="hint" style="margin-top:0;">Lima formula dasar (NORMAL, MISTIK LAMA, MISTIK BARU, INDEX, BHG/Naik4Turun3) diuraikan jadi beberapa varian sumber per posisi. Tiap varian diuji akurasi trennya di data terakhir, lalu diurutkan dari yang paling akurat. Khusus PK dan BHG, jendela data diatur otomatis (baca 19–29 data terbaru); hasilnya baru muncul kalau data tersedia minimal 19.</p>
     <div class="row" style="margin-top:0;">
       <label style="font-size:12px; color:var(--ink-dim);">Jendela tren N =</label>
       <select id="fxTrendN" class="fxSelect">
+        <option value="3">3</option>
+        <option value="5">5</option>
         <option value="7">7</option>
-        <option value="8">8</option>
-        <option value="9">9</option>
         <option value="10" selected>10</option>
+        <option value="15">15</option>
+        <option value="20">20</option>
+        <option value="30">30</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="all">All</option>
       </select>
       <label style="font-size:12px; color:var(--ink-dim);">Kontrol N (NRL/ML/MB/IDX) =</label>
       <select id="fxControlN" class="fxSelect">
+        <option value="3">3</option>
         <option value="5">5</option>
         <option value="7" selected>7</option>
         <option value="10">10</option>
+        <option value="15">15</option>
+        <option value="20">20</option>
+        <option value="30">30</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="all">All</option>
       </select>
       <button class="btn primary" id="fxRecalcBtn">🔁 Hitung Ulang</button>
     </div>
+    <div class="row" style="margin-top:8px;">
+      <button class="btn" id="fxOptWilsonBtn">🎯 Pilih N (Wilson Score)</button>
+      <button class="btn" id="fxOptWalkBtn">🔄 Pilih N (Walk-Forward)</button>
+      <button class="btn" id="fxOptEnsembleBtn">🗳️ Pilih N (Ensemble)</button>
+    </div>
+    <div class="fxOptLoading" id="fxOptLoading"><span class="fxSpinner"></span><span id="fxOptLoadingText">Menghitung...</span></div>
     <p class="hint" id="fxStatus" style="margin:8px 0 0; min-height:14px;"></p>
     <div id="fxCols" style="margin-top:12px;"></div>
 
@@ -627,7 +658,8 @@ const FX_BASES = [
   { code:'ML',  map: DIGIT_MAPS.mistikLama, kind:'stat' },
   { code:'MB',  map: DIGIT_MAPS.mistikBaru, kind:'stat' },
   { code:'IDX', map: DIGIT_MAPS.index,      kind:'stat' },
-  { code:'BHG', map: null,                  kind:'bhg'  }
+  { code:'BHG', map: null,                  kind:'bhg'  },
+  { code:'PK',  map: null,                  kind:'pk'   }
 ];
 
 function mod10(x){ return ((x % 10) + 10) % 10; }
@@ -649,7 +681,36 @@ function bhgPoolsAllSources(windowNewestFirst, targetLen){
   return last.slice(0, targetLen).map(d => naik4turun3(d));
 }
 
+// PK / Pola Kemunculan: untuk tiap posisi sumber, ambil digit terakhirnya sebagai "anchor".
+// Telusuri riwayat (dari terbaru ke terlama) — tiap kali angka historis MENGANDUNG digit anchor
+// di posisi manapun (bukan cuma posisi sumbernya), catat digit apa yang muncul di posisi sumber
+// itu pada draw BERIKUTNYA (draw yang lebih lama satu langkah). Kumpulkan semua catatan itu,
+// ranking berdasar frekuensi terbanyak → jadi pool 8 kandidat.
+function pkPoolsAllSources(windowNewestFirst, targetLen){
+  const pools = [];
+  for(let sIdx = 0; sIdx < targetLen; sIdx++){
+    const anchor = parseInt(windowNewestFirst[0][sIdx], 10);
+    const counts = new Array(10).fill(0);
+    for(let i = 0; i < windowNewestFirst.length - 1; i++){
+      const containsAnchor = windowNewestFirst[i].split('').some(ch => parseInt(ch, 10) === anchor);
+      if(containsAnchor){
+        const nextDigit = parseInt(windowNewestFirst[i + 1][sIdx], 10);
+        counts[nextDigit]++;
+      }
+    }
+    const ranked = counts.map((c, d) => ({ d: String(d), c })).sort((a, b) => b.c - a.c);
+    pools.push(ranked.slice(0, 8).map(r => r.d));
+  }
+  return pools;
+}
+
+// PK dan BHG tidak punya dropdown kontrol sendiri: jendela datanya otomatis, minimal 19 data (kalau kurang, formula ini
+// dianggap belum bisa dipakai / tidak tampil di hasil), maksimal membaca 29 data terbaru.
+const FX_BHG_PK_MIN = 19;
+const FX_BHG_PK_MAX = 29;
+
 // Susun daftar varian formula: tiap base x tiap posisi-sumber = 1 varian. fn(windowNewestFirst) -> pool per posisi target (sama untuk semua posisi, diambil dari 1 posisi sumber).
+// controlN = jendela data untuk formula statistik (NRL/ML/MB/IDX). PK/BHG memakai FX_BHG_PK_MIN..FX_BHG_PK_MAX otomatis.
 function fxBuildFormulaList(posLabels, controlN){
   const targetLen = posLabels.length;
   const list = [];
@@ -661,9 +722,16 @@ function fxBuildFormulaList(posLabels, controlN){
         source: sourceLabel,
         kind: base.kind,
         fn: (windowNewestFirst) => {
-          const pool = base.kind === 'stat'
-            ? statPoolsAllSources(windowNewestFirst.slice(0, controlN), base.map, targetLen)[sIdx]
-            : bhgPoolsAllSources(windowNewestFirst, targetLen)[sIdx];
+          if(base.kind === 'stat'){
+            const pool = statPoolsAllSources(windowNewestFirst.slice(0, controlN), base.map, targetLen)[sIdx];
+            return posLabels.map(() => pool);
+          }
+          // PK/BHG: butuh minimal FX_BHG_PK_MIN data, baca maksimal FX_BHG_PK_MAX data terbaru.
+          if(windowNewestFirst.length < FX_BHG_PK_MIN) throw new Error('Data PK/BHG belum cukup (minimal 19).');
+          const win = windowNewestFirst.slice(0, FX_BHG_PK_MAX);
+          const pool = base.kind === 'bhg'
+            ? bhgPoolsAllSources(win, targetLen)[sIdx]
+            : pkPoolsAllSources(win, targetLen)[sIdx];
           return posLabels.map(() => pool);
         }
       });
@@ -674,7 +742,7 @@ function fxBuildFormulaList(posLabels, controlN){
 
 // Uji akurasi tren: geser mundur dari data terbaru, tiap langkah pakai window sebelumnya untuk menebak 1 data berikutnya, sampai N transisi terkumpul.
 function fxTrendAccuracy(formula, chronoNum, controlN, trendN, posIdx){
-  const minNeeded = (formula.kind === 'bhg') ? 1 : Math.min(controlN, 1);
+  const minNeeded = (formula.kind === 'bhg' || formula.kind === 'pk') ? FX_BHG_PK_MIN : Math.min(controlN, 1);
   let hit = 0, total = 0;
   for(let i = chronoNum.length - 1; i >= 1 && total < trendN; i--){
     const available = chronoNum.slice(0, i);
@@ -689,9 +757,160 @@ function fxTrendAccuracy(formula, chronoNum, controlN, trendN, posIdx){
   return { hit, total, pct: total > 0 ? (hit / total * 100) : 0 };
 }
 
+// ---------- Optimasi N (Jendela Tren & Kontrol) — bandingkan beberapa kandidat, pilih yang terbaik ----------
+const FX_N_CANDIDATES = [3, 5, 7, 10, 15, 20, 30, 50, 100];
+
+// Batas bawah interval kepercayaan Wilson (95%) — "menghukum" akurasi dari sampel kecil yang kebetulan tinggi,
+// beda dari persentase mentah (hit/total) yang gampang bias kalau totalnya sedikit.
+function wilsonLowerBound(hit, total, z){
+  z = z || 1.96;
+  if(total === 0) return 0;
+  const phat = hit / total;
+  const denom = 1 + (z * z) / total;
+  const centre = phat + (z * z) / (2 * total);
+  const margin = z * Math.sqrt((phat * (1 - phat) + (z * z) / (4 * total)) / total);
+  return (centre - margin) / denom;
+}
+
+// Walk-forward: uji akurasi dari BEBERAPA titik potong mundur (bukan cuma dari data terakhir),
+// lalu gabungkan hasilnya — supaya tidak "beruntung" cuma cocok di beberapa data terakhir saja.
+function fxTrendAccuracyWalkForward(formula, chronoNum, controlN, trendN, posIdx, folds){
+  const step = Math.max(1, Math.floor((trendN === Infinity ? 10 : trendN) / 2));
+  let totalHit = 0, totalCount = 0, foldsUsed = 0;
+  for(let f = 0; f < folds; f++){
+    const trimEnd = chronoNum.length - f * step;
+    if(trimEnd < 2) break;
+    const slice = chronoNum.slice(0, trimEnd);
+    const r = fxTrendAccuracy(formula, slice, controlN, trendN, posIdx);
+    if(r.total > 0){ totalHit += r.hit; totalCount += r.total; foldsUsed++; }
+  }
+  return { hit: totalHit, total: totalCount, pct: totalCount > 0 ? (totalHit / totalCount * 100) : 0, folds: foldsUsed };
+}
+
+// Jalankan pencarian kandidat (controlN x trendN), skor tiap pasangan pakai fungsi `scoreFn`,
+// lalu kembalikan pasangan dengan skor rata-rata tertinggi antar posisi.
+function fxSearchBestN(used, posLabels, scoreFn){
+  const chronoNum = used.slice().reverse();
+  let best = null;
+  FX_N_CANDIDATES.forEach(controlN => {
+    const formulas = fxBuildFormulaList(posLabels, controlN);
+    FX_N_CANDIDATES.forEach(trendN => {
+      let sumScore = 0, posCounted = 0;
+      posLabels.forEach((label, idx) => {
+        let bestScore = -1;
+        formulas.forEach(f => {
+          const r = scoreFn(f, chronoNum, controlN, trendN, idx);
+          if(r.total > 0){
+            const score = wilsonLowerBound(r.hit, r.total);
+            if(score > bestScore) bestScore = score;
+          }
+        });
+        if(bestScore >= 0){ sumScore += bestScore; posCounted++; }
+      });
+      if(posCounted === posLabels.length){
+        const avgScore = sumScore / posCounted;
+        if(!best || avgScore > best.avgScore) best = { controlN, trendN, avgScore };
+      }
+    });
+  });
+  return best;
+}
+
+// Ensemble/voting: tiap formula & posisi "memilih" pasangan N terbaiknya sendiri (akurasi mentah tertinggi),
+// lalu pasangan yang paling sering menang (voting terbanyak) yang dipakai.
+function fxSearchBestNEnsemble(used, posLabels){
+  const chronoNum = used.slice().reverse();
+  const votes = {};
+  posLabels.forEach((label, idx) => {
+    FX_N_CANDIDATES.forEach(controlN => {
+      const formulas = fxBuildFormulaList(posLabels, controlN);
+      formulas.forEach(f => {
+        let bestPair = null, bestPct = -1;
+        FX_N_CANDIDATES.forEach(trendN => {
+          const r = fxTrendAccuracy(f, chronoNum, controlN, trendN, idx);
+          if(r.total > 0 && r.pct > bestPct){ bestPct = r.pct; bestPair = { controlN, trendN }; }
+        });
+        if(bestPair){
+          const key = bestPair.controlN + '_' + bestPair.trendN;
+          votes[key] = (votes[key] || 0) + 1;
+        }
+      });
+    });
+  });
+  let bestKey = null, bestVotes = -1;
+  Object.keys(votes).forEach(key => { if(votes[key] > bestVotes){ bestVotes = votes[key]; bestKey = key; } });
+  if(!bestKey) return null;
+  const [controlN, trendN] = bestKey.split('_').map(Number);
+  return { controlN, trendN, votes: bestVotes };
+}
+
+function fxApplyOptimizedN(result, label){
+  const status = document.getElementById('fxStatus');
+  if(!result){
+    status.style.color = 'var(--rose)';
+    status.textContent = 'Data historis belum cukup untuk mengoptimalkan N.';
+    return;
+  }
+  document.getElementById('fxControlN').value = String(result.controlN);
+  document.getElementById('fxTrendN').value = String(result.trendN);
+  computeFormulaX(lastHistoryNumbers, lastPosLabels);
+  status.style.color = 'var(--teal)';
+  status.textContent = `${label}: Kontrol N=${result.controlN}, Jendela Tren N=${result.trendN} — ` + status.textContent;
+}
+
+// Tampilkan spinner dulu, baru jalankan komputasi berat lewat setTimeout — supaya browser sempat
+// menggambar animasinya sebelum thread JS sibuk (kalau langsung dijalankan, animasinya tidak akan terlihat).
+function fxRunOptimizer(label, computeFn){
+  const loading = document.getElementById('fxOptLoading');
+  const loadingText = document.getElementById('fxOptLoadingText');
+  const buttons = [
+    document.getElementById('fxOptWilsonBtn'),
+    document.getElementById('fxOptWalkBtn'),
+    document.getElementById('fxOptEnsembleBtn'),
+    document.getElementById('fxRecalcBtn')
+  ];
+  buttons.forEach(b => b.disabled = true);
+  loadingText.textContent = `Menghitung kombinasi N (${label})...`;
+  loading.style.display = 'flex';
+  setTimeout(() => {
+    try{
+      computeFn();
+    } finally {
+      loading.style.display = 'none';
+      buttons.forEach(b => b.disabled = false);
+    }
+  }, 30);
+}
+
+document.getElementById('fxOptWilsonBtn').addEventListener('click', () => {
+  if(!lastHistoryNumbers.length || !lastPosLabels) return;
+  fxRunOptimizer('Wilson Score', () => {
+    const best = fxSearchBestN(lastHistoryNumbers, lastPosLabels, fxTrendAccuracy);
+    fxApplyOptimizedN(best, 'Wilson Score');
+  });
+});
+
+document.getElementById('fxOptWalkBtn').addEventListener('click', () => {
+  if(!lastHistoryNumbers.length || !lastPosLabels) return;
+  fxRunOptimizer('Walk-Forward', () => {
+    const best = fxSearchBestN(lastHistoryNumbers, lastPosLabels, (f, chrono, cN, tN, idx) => fxTrendAccuracyWalkForward(f, chrono, cN, tN, idx, 5));
+    fxApplyOptimizedN(best, 'Walk-Forward');
+  });
+});
+
+document.getElementById('fxOptEnsembleBtn').addEventListener('click', () => {
+  if(!lastHistoryNumbers.length || !lastPosLabels) return;
+  fxRunOptimizer('Ensemble', () => {
+    const best = fxSearchBestNEnsemble(lastHistoryNumbers, lastPosLabels);
+    fxApplyOptimizedN(best, 'Ensemble');
+  });
+});
+
 function computeFormulaX(used, posLabels){
-  const controlN = parseInt(document.getElementById('fxControlN').value, 10);
-  const trendN = parseInt(document.getElementById('fxTrendN').value, 10);
+  const controlNRaw = document.getElementById('fxControlN').value;
+  const trendNRaw = document.getElementById('fxTrendN').value;
+  const controlN = controlNRaw === 'all' ? Infinity : parseInt(controlNRaw, 10);
+  const trendN = trendNRaw === 'all' ? Infinity : parseInt(trendNRaw, 10);
   const chronoNum = used.slice().reverse(); // urut lama -> baru
   const formulas = fxBuildFormulaList(posLabels, controlN);
   FX_FORMULAS_CACHE = { formulas, controlN };
@@ -708,9 +927,10 @@ function computeFormulaX(used, posLabels){
   });
   FX_RECOMMENDATIONS = recs;
 
+  // Selalu arahkan pilihan (radio) ke varian dengan akurasi tertinggi tiap kali dihitung ulang / dioptimalkan
+  // (Hitung Ulang, Pilih N Wilson, Pilih N Walk-Forward, Pilih N Ensemble) — tidak mempertahankan pilihan lama.
   posLabels.forEach(label => {
-    const stillValid = recs[label].some(o => o.key === FX_SELECTED[label]);
-    if(!stillValid) FX_SELECTED[label] = recs[label][0] ? recs[label][0].key : null;
+    FX_SELECTED[label] = recs[label][0] ? recs[label][0].key : null;
   });
 
   renderFormulaX(posLabels);
@@ -720,13 +940,18 @@ function computeFormulaX(used, posLabels){
 
   const status = document.getElementById('fxStatus');
   const anyData = posLabels.some(l => recs[l].length > 0);
+  const trendNDisplay = trendN === Infinity ? 'seluruh' : trendN;
+  const controlNDisplay = controlN === Infinity ? 'seluruh' : controlN;
   if(anyData){
     status.style.color = 'var(--teal)';
-    status.textContent = `Akurasi dihitung dari maksimal ${trendN} transisi terakhir per varian (kontrol ${controlN}).`;
+    status.textContent = `Akurasi dihitung dari maksimal ${trendNDisplay} transisi terakhir per varian (kontrol ${controlNDisplay}, PK/BHG otomatis ${FX_BHG_PK_MIN}-${FX_BHG_PK_MAX}).`;
   } else {
     status.style.color = 'var(--rose)';
     status.textContent = 'Data historis belum cukup untuk menghitung tren Formula X.';
   }
+
+  // Otomatis isi Generator & Kombinasi Acak begitu pilihan (radio) diarahkan ke varian teratas — tanpa perlu klik "ANGKA TOP".
+  fxApplyToGenerator(true);
 }
 
 function renderFormulaX(posLabels){
@@ -750,7 +975,12 @@ function renderFormulaX(posLabels){
       radio.name = 'fxpos_' + label;
       radio.value = opt.key;
       radio.checked = (opt.key === FX_SELECTED[label]);
-      radio.addEventListener('change', () => { FX_SELECTED[label] = opt.key; });
+      radio.addEventListener('change', () => {
+        FX_SELECTED[label] = opt.key;
+        renderFxTrendNumbers(posLabels, lastHistoryNumbers);
+        renderFxBacktestTable(posLabels, lastHistoryNumbers);
+        fxApplyToGenerator(true);
+      });
       row.appendChild(radio);
       const txt = document.createElement('span');
       txt.className = 'lbl';
@@ -772,7 +1002,9 @@ function renderFormulaX(posLabels){
   grid.appendChild(wrap);
 }
 
-// Tampilkan 3 varian teratas tiap posisi sebagai pool 8 digit langsung (bukan persentase) — "ANGKA HASIL TREN"
+// Tampilkan 3 varian teratas tiap posisi sebagai pool 8 digit langsung (bukan persentase) — "ANGKA HASIL TREN".
+// Varian yang sedang dipilih lewat radio (FX_SELECTED) selalu ikut tampil di sini: kalau dia belum termasuk
+// 3 teratas, dia menggantikan urutan terakhir supaya angka yang lagi dipakai selalu kelihatan di daftar ini.
 function renderFxTrendNumbers(posLabels, used){
   const grid = document.getElementById('fxTrendCols');
   if(!FX_RECOMMENDATIONS || !FX_FORMULAS_CACHE){ grid.innerHTML = ''; return; }
@@ -789,15 +1021,23 @@ function renderFxTrendNumbers(posLabels, used){
     col.appendChild(h3);
     const list = document.createElement('div');
     list.className = 'fxTrendList';
-    const top3 = (FX_RECOMMENDATIONS[label] || []).slice(0, 3);
-    top3.forEach(opt => {
+
+    const recs = FX_RECOMMENDATIONS[label] || [];
+    const selectedKey = FX_SELECTED[label];
+    let shown = recs.slice(0, 3);
+    if(selectedKey && !shown.some(o => o.key === selectedKey)){
+      const selOpt = recs.find(o => o.key === selectedKey);
+      if(selOpt) shown = shown.length ? shown.slice(0, -1).concat(selOpt) : [selOpt];
+    }
+
+    shown.forEach(opt => {
       const f = formulaByKey[opt.key];
       let pool = [];
       if(f){
         try{ pool = f.fn(used)[idx] || []; }catch(e){ pool = []; }
       }
       const row = document.createElement('div');
-      row.className = 'fxTrendRow';
+      row.className = 'fxTrendRow' + (opt.key === selectedKey ? ' selected' : '');
       const lbl = document.createElement('span');
       lbl.className = 'lbl';
       lbl.textContent = opt.label + ' (' + opt.source + ')';
@@ -808,7 +1048,7 @@ function renderFxTrendNumbers(posLabels, used){
       row.appendChild(digits);
       list.appendChild(row);
     });
-    if(!top3.length){
+    if(!shown.length){
       list.innerHTML = '<p class="emptynote" style="padding:6px 0;">Data belum cukup.</p>';
     }
     col.appendChild(list);
@@ -907,7 +1147,7 @@ function renderFxBacktestTable(posLabels, used){
   }
 
   const controlN = FX_FORMULAS_CACHE.controlN;
-  const minNeeded = Math.max(...selFn.map(f => f.kind === 'bhg' ? 1 : controlN));
+  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (controlN === Infinity ? 1 : controlN)));
   const chronoNum = used.slice().reverse(); // lama -> baru
 
   let success = 0, fail = 0;
@@ -977,24 +1217,31 @@ setupSectionToggle('shioToggle', 'shioWrap', 'shioToggleIcon');
 setupSectionToggle('genToggle', 'genWrap', 'genToggleIcon');
 
 
-// Isi Generator & Kombinasi Acak pakai varian Formula X yang dipilih (radio) tiap posisi
-function fxApplyToGenerator(){
+// Isi Generator & Kombinasi Acak pakai varian Formula X yang dipilih (radio) tiap posisi.
+// silent=true (dipanggil otomatis dari computeFormulaX/radio) -> tidak tampilkan alert kalau belum siap, cukup diam saja.
+function fxApplyToGenerator(silent){
   if(!FX_FORMULAS_CACHE || !lastPosLabels || !lastHistoryNumbers.length){
-    alert('Hitung Formula X dulu (isi Data Historis lalu Hitung Frekuensi).');
+    if(!silent) alert('Hitung Formula X dulu (isi Data Historis lalu Hitung Frekuensi).');
     return;
   }
   const formulaByKey = {};
   FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
 
-  const pools = lastPosLabels.map((label, idx) => {
-    const f = formulaByKey[FX_SELECTED[label]];
-    if(!f) return [];
-    const allPools = f.fn(lastHistoryNumbers); // lastHistoryNumbers sudah newest-first
-    return allPools[idx] || [];
-  });
+  let pools;
+  try{
+    pools = lastPosLabels.map((label, idx) => {
+      const f = formulaByKey[FX_SELECTED[label]];
+      if(!f) return [];
+      const allPools = f.fn(lastHistoryNumbers); // lastHistoryNumbers sudah newest-first
+      return allPools[idx] || [];
+    });
+  } catch(e){
+    if(!silent) alert('Tiap posisi (' + lastPosLabels.join('/') + ') harus punya varian Formula X yang valid — coba Hitung Ulang.');
+    return;
+  }
 
   if(pools.some(p => !p.length)){
-    alert('Tiap posisi (' + lastPosLabels.join('/') + ') harus punya varian Formula X yang valid — coba Hitung Ulang.');
+    if(!silent) alert('Tiap posisi (' + lastPosLabels.join('/') + ') harus punya varian Formula X yang valid — coba Hitung Ulang.');
     return;
   }
 
@@ -1003,7 +1250,7 @@ function fxApplyToGenerator(){
   generateCombineOutput();
   if(document.getElementById('filterCard').style.display === 'block') resetFilters();
 }
-document.getElementById('fxApplyBtn').addEventListener('click', fxApplyToGenerator);
+document.getElementById('fxApplyBtn').addEventListener('click', () => fxApplyToGenerator(false));
 
 // Isi Generator & Kombinasi Acak pakai radio Kuat/Sedang yang dipilih di Top Posisi tiap posisi
 function applyTopPosisiToGenerator(){
@@ -1157,7 +1404,6 @@ function analyze(){
   renderShioAnalysis(used, targetLen);
 
   document.getElementById('bulkCard').style.display = 'block';
-  fxApplyToGenerator();
 
   document.getElementById('filterCard').style.display = 'block';
   renderTwinMurniCheckboxes(targetLen);
@@ -1829,180 +2075,4 @@ function loadSavedEntriesFromStorage(){
 }
 
 function cacheToLocalStorage(list){
-  try{ localStorage.setItem(SAVE_KEY, JSON.stringify(list)); }catch(e){ /* localStorage diblokir — tetap jalan dari cache memori */ }
-}
-
-function getSavedEntries(){
-  return savedEntriesCache;
-}
-
-function getSortedEntries(){
-  return getSavedEntries().slice().sort((a, b) => a.name.localeCompare(b.name, 'id', { sensitivity: 'base' }));
-}
-
-function setSavedEntries(list){
-  savedEntriesCache = list;
-  cacheToLocalStorage(list);
-  if(db){
-    authReadyPromise.then(isAuthed => {
-      if(!isAuthed) return; // tetap tersimpan lokal, tanpa sync cloud
-      db.ref('savedData').set(list).catch(e => {
-        console.error('Gagal sync ke cloud:', e);
-        document.getElementById('saveFeedback').textContent = 'Tersimpan lokal, tapi gagal sync ke cloud (cek koneksi internet).';
-        document.getElementById('saveFeedback').style.color = 'var(--rose)';
-      });
-    });
-  }
-}
-
-function updateSavedMeta(){
-  const entries = getSortedEntries();
-  const select = document.getElementById('savedSelect');
-  const metaLine = document.getElementById('savedMetaLine');
-  const entry = entries[select.selectedIndex];
-  if(!entry){ metaLine.textContent = ''; return; }
-  const count = parseData(entry.data).length;
-  metaLine.textContent = `${count} data · disimpan ${entry.savedAt}`;
-}
-
-function renderSavedList(){
-  const entries = getSortedEntries();
-  const select = document.getElementById('savedSelect');
-  const emptyNote = document.getElementById('savedEmptyNote');
-  const selectWrap = document.getElementById('savedSelectWrap');
-  const actionsRow = document.getElementById('savedActionsRow');
-  const metaLine = document.getElementById('savedMetaLine');
-
-  if(entries.length === 0){
-    emptyNote.style.display = 'block';
-    selectWrap.style.display = 'none';
-    actionsRow.style.display = 'none';
-    metaLine.style.display = 'none';
-    select.innerHTML = '';
-    return;
-  }
-  emptyNote.style.display = 'none';
-  selectWrap.style.display = '';
-  actionsRow.style.display = '';
-  metaLine.style.display = '';
-
-  const prevValue = select.value;
-  select.innerHTML = entries.map(e => `<option value="${e.name}">${e.name}</option>`).join('');
-  // pertahankan pilihan sebelumnya kalau namanya masih ada di daftar
-  if(entries.some(e => e.name === prevValue)) select.value = prevValue;
-  updateSavedMeta();
-}
-
-document.getElementById('savedSelect').addEventListener('change', updateSavedMeta);
-
-document.getElementById('savedLoadBtn').addEventListener('click', () => {
-  const entries = getSortedEntries();
-  const entry = entries[document.getElementById('savedSelect').selectedIndex];
-  if(!entry) return;
-  document.getElementById('dataInput').value = entry.data;
-  document.getElementById('saveNameInput').value = entry.name;
-  resetAllSettings();
-  analyze();
-});
-
-document.getElementById('savedDelBtn').addEventListener('click', () => {
-  const entries = getSortedEntries();
-  const idx = document.getElementById('savedSelect').selectedIndex;
-  const entry = entries[idx];
-  if(!entry) return;
-  if(!checkSecurityCode(`menghapus data "${entry.name}"`)) return;
-  if(!confirm(`Yakin ingin menghapus data "${entry.name}"? Aksi ini tidak bisa dibatalkan.`)) return;
-  const updated = getSavedEntries().slice();
-  const originalIdx = updated.findIndex(e => e.name === entry.name);
-  if(originalIdx < 0) return;
-  updated.splice(originalIdx, 1);
-  setSavedEntries(updated);
-  renderSavedList();
-});
-
-document.getElementById('saveDataBtn').addEventListener('click', () => {
-  const data = document.getElementById('dataInput').value;
-  const feedback = document.getElementById('saveFeedback');
-  if(!parseData(data).length){
-    feedback.textContent = 'Tidak ada data untuk disimpan — isi kolom Data Historis dulu.';
-    feedback.style.color = 'var(--rose)';
-    return;
-  }
-  if(!checkSecurityCode('menyimpan data ini')) return;
-  const entries = getSavedEntries().slice();
-  const nameInput = document.getElementById('saveNameInput');
-  const trimmed = nameInput.value.trim() || `Data ${entries.length + 1}`;
-  const existingIdx = entries.findIndex(e => e.name === trimmed);
-  const confirmMsg = existingIdx >= 0
-    ? `Data "${trimmed}" sudah ada. Timpa dengan data baru ini?`
-    : `Simpan data ini sebagai "${trimmed}"?`;
-  if(!confirm(confirmMsg)) return;
-  const savedAt = new Date().toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const newEntry = { name: trimmed, data, savedAt };
-  if(existingIdx >= 0){ entries[existingIdx] = newEntry; } else { entries.push(newEntry); }
-  setSavedEntries(entries);
-  renderSavedList();
-  feedback.style.color = 'var(--teal)';
-  feedback.textContent = existingIdx >= 0 ? `Tersimpan (memperbarui "${trimmed}") ✓ — sync ke cloud...` : `Tersimpan sebagai "${trimmed}" ✓ — sync ke cloud...`;
-  nameInput.value = trimmed;
-  setTimeout(() => { feedback.textContent = ''; }, 3000);
-});
-
-// Muat data awal dari cloud, lalu dengarkan perubahan real-time (sync otomatis antar perangkat)
-// Menunggu sign-in anonim selesai dulu, karena Rules mewajibkan auth != null
-if(db){
-  authReadyPromise.then(isAuthed => {
-  if(!isAuthed){
-    savedEntriesCache = loadSavedEntriesFromStorage();
-    renderSavedList();
-    return;
-  }
-  db.ref('savedData').once('value')
-    .then(snap => {
-      savedEntriesCache = snap.exists() ? snap.val() : loadSavedEntriesFromStorage();
-      firebaseReady = true;
-      renderSavedList();
-      const statusEl = document.getElementById('cloudStatus');
-      if(statusEl){ statusEl.textContent = '· ☁️ tersinkron'; statusEl.style.color = 'var(--teal)'; }
-    })
-    .catch(e => {
-      console.error('Gagal ambil data cloud, pakai data lokal:', e);
-      savedEntriesCache = loadSavedEntriesFromStorage();
-      renderSavedList();
-      const statusEl = document.getElementById('cloudStatus');
-      if(statusEl){ statusEl.textContent = '· ⚠️ gagal konek cloud, pakai data lokal'; statusEl.style.color = 'var(--rose)'; }
-    });
-
-  db.ref('savedData').on('value', snap => {
-    if(!firebaseReady) return; // hindari trigger ganda saat load pertama
-    savedEntriesCache = snap.exists() ? snap.val() : [];
-    cacheToLocalStorage(savedEntriesCache);
-    renderSavedList();
-  });
-  }); // tutup authReadyPromise.then()
-} else {
-  savedEntriesCache = loadSavedEntriesFromStorage();
-  renderSavedList();
-  const statusEl = document.getElementById('cloudStatus');
-  if(statusEl){ statusEl.textContent = '· ⚠️ cloud tidak tersedia, pakai data lokal'; statusEl.style.color = 'var(--rose)'; }
-}
-
-// Kalau proses konek cloud belum selesai juga setelah 8 detik (mis. koneksi sangat lambat),
-// kasih status yang jujur — bukan biarkan "menghubungkan ke cloud..." menggantung tanpa kejelasan.
-setTimeout(() => {
-  const statusEl = document.getElementById('cloudStatus');
-  if(statusEl && statusEl.textContent.includes('menghubungkan')){
-    statusEl.textContent = '· koneksi lambat, menampilkan data lokal sementara';
-    statusEl.style.color = 'var(--amber)';
-  }
-}, 8000);
-
-// tampilan awal dikosongkan — tunggu user tempel data sendiri, kecuali ada link bagikan di URL
-window.addEventListener('DOMContentLoaded', () => {
-  if(restoreFromShareLink()) return;
-  document.getElementById('dataInput').value = '';
-  analyze();
-});
-</script>
-</body>
-</html>
+  try{ localStorage.setItem(SA
