@@ -2,5 +2,9 @@
   "name": "ag",
   "compatibility_date": "2026-09-01",
   "main": "src/worker.js",
-  "assets": { "directory": "./", "binding": "ASSETS" }
+  "assets": { "directory": "./", "binding": "ASSETS" },
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true }
+  }
 }
