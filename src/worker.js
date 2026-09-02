@@ -7,17 +7,18 @@ export default {
     if (url.pathname === '/api/debug') {
       return Response.json({
         db_test: env.DB_TEST ?? 'KOSONG',
-        has_database_url: !!env.DATABASE_URL
+        has_secret_binding: !!env.DATABASE_URL_SECRET
       });
     }
 
     const match = url.pathname.match(/^\/api\/settings\/([^/]+)$/);
     if (match) {
       const pasaran = decodeURIComponent(match[1]);
-      if (!env.DATABASE_URL) {
+      const dbUrl = await env.DATABASE_URL_SECRET.get();
+      if (!dbUrl) {
         return Response.json({ ok: false, stage: 'env', error: 'DATABASE_URL tidak tersedia di Worker' });
       }
-      const sql = neon(env.DATABASE_URL);
+      const sql = neon(dbUrl);
       if (request.method === 'GET') {
         const rows = await sql`SELECT settings FROM s1_settings WHERE pasaran = ${pasaran}`;
         return Response.json(rows[0]?.settings ?? null);
