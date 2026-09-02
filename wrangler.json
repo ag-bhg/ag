@@ -4,8 +4,12 @@
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/worker.js",
   "assets": { "directory": "./", "binding": "ASSETS" },
-  "observability": {
-    "enabled": true,
-    "logs": { "enabled": true }
-  }
+  "observability": { "enabled": true, "logs": { "enabled": true } },
+  "secrets_store_secrets": [
+    {
+      "binding": "DATABASE_URL_SECRET",
+      "store_id": "1217b0ecd3ad4933adbf374f9331b540",
+      "secret_name": "database-url"
+    }
+  ]
 }
