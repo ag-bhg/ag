@@ -219,7 +219,8 @@ export default {
       return Response.json({
         db_test: env.DB_TEST ?? 'KOSONG',
         has_secret_binding: !!env.DATABASE_URL_SECRET,
-        has_firebase_secret: !!env.FIREBASE_SERVICE_ACCOUNT
+        has_firebase_secret: !!env.FIREBASE_SERVICE_ACCOUNT,
+        available_env_keys: Object.keys(env)
       });
     }
 
