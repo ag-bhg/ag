@@ -38,11 +38,13 @@ function pemToArrayBuffer(pem) {
 }
 
 async function getFirebaseAccessToken(env) {
-  const raw = env.FIREBASE_SERVICE_ACCOUNT;
-  if (!raw) {
-    throw new Error('FIREBASE_SERVICE_ACCOUNT tidak ditemukan di env — cek lagi di Settings > Variables and Secrets');
+  const dbUrl = await env.DATABASE_URL_SECRET.get();
+  const sql = neon(dbUrl);
+  const rows = await sql`SELECT value FROM app_secrets WHERE key = 'firebase_service_account'`;
+  if (!rows.length) {
+    throw new Error('Kredensial firebase_service_account tidak ditemukan di tabel app_secrets');
   }
-  const sa = JSON.parse(raw);
+  const sa = JSON.parse(rows[0].value);
 
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: 'RS256', typ: 'JWT' };
@@ -216,10 +218,13 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/api/debug') {
+      const dbUrl = await env.DATABASE_URL_SECRET.get();
+      const sql = neon(dbUrl);
+      const rows = await sql`SELECT key FROM app_secrets WHERE key = 'firebase_service_account'`;
       return Response.json({
         db_test: env.DB_TEST ?? 'KOSONG',
         has_secret_binding: !!env.DATABASE_URL_SECRET,
-        has_firebase_secret: !!env.FIREBASE_SERVICE_ACCOUNT,
+        has_firebase_secret_in_neon: rows.length > 0,
         available_env_keys: Object.keys(env)
       });
     }
