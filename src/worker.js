@@ -37,9 +37,7 @@ function pemToArrayBuffer(pem) {
   return bytes.buffer;
 }
 
-async function getFirebaseAccessToken(env) {
-  const dbUrl = await env.DATABASE_URL_SECRET.get();
-  const sql = neon(dbUrl);
+async function getFirebaseAccessToken(sql) {
   const rows = await sql`SELECT value FROM app_secrets WHERE key = 'firebase_service_account'`;
   if (!rows.length) {
     throw new Error('Kredensial firebase_service_account tidak ditemukan di tabel app_secrets');
@@ -115,23 +113,39 @@ async function firebaseUpdateEntryData(token, entryKey, newDataString) {
   if (!resp.ok) throw new Error(`Gagal update entry ${entryKey}: ${resp.status}`);
 }
 
+// Update banyak entry sekaligus dalam SATU request (hemat subrequest)
+// updates berbentuk: { "savedData/<key1>/data": "...", "savedData/<key2>/data": "..." }
+async function firebaseMultiUpdate(token, updates) {
+  const resp = await fetch(`${FIREBASE_DB_URL}/.json`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(updates)
+  });
+  if (!resp.ok) throw new Error('Gagal multi-update Firebase: ' + resp.status);
+}
+
 // ============================================================
 // BAGIAN 3 — Baca data terbaru dari Neon (tabel history, punya S2)
 // ============================================================
 
-async function getKodePasaranList(sql) {
-  const rows = await sql`SELECT DISTINCT kode_pasaran FROM history`;
-  return rows.map(r => r.kode_pasaran).filter(Boolean);
-}
-
-async function getHistoryRows(sql, kode) {
-  // urutkan pakai sort_key (kolom yang memang dibuat buat urutan kronologis)
-  return sql`
-    SELECT tanggal, periode, nomor
+// Ambil SEMUA baris history dalam SATU query, lalu dikelompokkan per kode_pasaran di memori
+// (jauh lebih hemat subrequest dibanding query terpisah per kode pasaran)
+async function getAllHistoryGrouped(sql) {
+  const rows = await sql`
+    SELECT kode_pasaran, tanggal, periode, nomor
     FROM history
-    WHERE kode_pasaran = ${kode}
-    ORDER BY sort_key ASC
+    ORDER BY kode_pasaran ASC, sort_key ASC
   `;
+  const grouped = {};
+  for (const row of rows) {
+    if (!row.kode_pasaran) continue;
+    if (!grouped[row.kode_pasaran]) grouped[row.kode_pasaran] = [];
+    grouped[row.kode_pasaran].push(row);
+  }
+  return grouped;
 }
 
 // ============================================================
@@ -170,24 +184,23 @@ async function runSync(env) {
   const dbUrl = await env.DATABASE_URL_SECRET.get();
   const sql = neon(dbUrl);
 
-  const token = await getFirebaseAccessToken(env);
-  const savedData = await firebaseGetSavedData(token);
+  const token = await getFirebaseAccessToken(sql);        // 1 query
+  const savedData = await firebaseGetSavedData(token);     // 1 fetch
+  const grouped = await getAllHistoryGrouped(sql);         // 1 query (semua kode sekaligus)
 
-  const kodeList = await getKodePasaranList(sql);
   const summary = [];
+  const updates = {}; // path -> value, dikirim sekaligus di akhir
 
-  for (const kode of kodeList) {
+  for (const kode of Object.keys(grouped)) {
     const found = findEntryKeyByName(savedData, kode);
     if (!found) {
       summary.push(`${kode}: dilewati (belum ada entry Firebase dengan nama ini)`);
       continue;
     }
 
-    const rows = await getHistoryRows(sql, kode);
     const existingKeys = parseExistingKeys(found.entry.data || '');
-
     const newLines = [];
-    for (const row of rows) {
+    for (const row of grouped[kode]) {
       const k = `${String(row.tanggal).trim()}|${String(row.periode).trim()}`;
       if (!existingKeys.has(k)) {
         newLines.push(`${row.tanggal}\t${row.periode}\t${row.nomor}`);
@@ -201,8 +214,12 @@ async function runSync(env) {
 
     const oldData = (found.entry.data || '').trim();
     const combined = oldData ? `${oldData}\n${newLines.join('\n')}` : newLines.join('\n');
-    await firebaseUpdateEntryData(token, found.key, combined);
+    updates[`${FIREBASE_DATA_PATH}/${found.key}/data`] = combined;
     summary.push(`${kode}: +${newLines.length} baris baru ditambahkan`);
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await firebaseMultiUpdate(token, updates); // 1 fetch, apa pun jumlah kode yang berubah
   }
 
   console.log('[auto-sync]', summary.join(' | '));
