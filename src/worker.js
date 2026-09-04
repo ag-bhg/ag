@@ -222,7 +222,8 @@ export default {
     }
 
     // Endpoint manual buat trigger sync sendiri kalau mau tes tanpa nunggu cron
-    if (url.pathname === '/api/sync-now' && request.method === 'POST') {
+    // (sengaja diizinkan lewat GET juga supaya bisa dibuka langsung dari browser HP)
+    if (url.pathname === '/api/sync-now') {
       try {
         const summary = await runSync(env);
         return Response.json({ ok: true, summary });
