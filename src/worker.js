@@ -38,9 +38,10 @@ function pemToArrayBuffer(pem) {
 }
 
 async function getFirebaseAccessToken(env) {
-  const raw = await env.FIREBASE_SERVICE_ACCOUNT.get
-    ? await env.FIREBASE_SERVICE_ACCOUNT.get() // kalau dibind sebagai Secrets Store binding
-    : env.FIREBASE_SERVICE_ACCOUNT;            // kalau dibind sebagai secret var biasa
+  const raw = env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT tidak ditemukan di env — cek lagi di Settings > Variables and Secrets');
+  }
   const sa = JSON.parse(raw);
 
   const now = Math.floor(Date.now() / 1000);
@@ -217,7 +218,8 @@ export default {
     if (url.pathname === '/api/debug') {
       return Response.json({
         db_test: env.DB_TEST ?? 'KOSONG',
-        has_secret_binding: !!env.DATABASE_URL_SECRET
+        has_secret_binding: !!env.DATABASE_URL_SECRET,
+        has_firebase_secret: !!env.FIREBASE_SERVICE_ACCOUNT
       });
     }
 
