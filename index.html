@@ -429,8 +429,8 @@
     <div id="firebaseDataCard" style="margin-top:14px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--panel-2);">
       <div style="display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap;">
         <div>
-          <b>☁️ DATA S1 · FIREBASE</b>
-          <div class="hint" style="margin-top:3px;">S1 hanya membaca Firebase. Data diperbarui oleh alur Neon → GitHub Actions → Firebase.</div>
+          <b>☁️ DATA TERUPDATE</b>
+          <div class="hint" style="margin-top:3px;">Pilih pasaran yang di inginkan </div>
         </div>
         <span id="firebaseDataBadge" class="badge">Menghubungkan…</span>
       </div>
@@ -465,7 +465,7 @@
     <div id="fxCardWrap" style="display:block;">
     <p class="hint" style="margin-top:0;">Lima formula dasar untuk menentukan Pola.</p>
     <div class="row" style="margin-top:0;">
-      <label style="font-size:12px; color:var(--ink-dim);">Jendela tren N =</label>
+      <label style="font-size:12px; color:var(--ink-dim);">Tren =</label>
       <select id="fxTrendN" class="fxSelect">
         <option value="3">3</option>
         <option value="5">5</option>
@@ -478,7 +478,7 @@
         <option value="100">100</option>
         <option value="all">All</option>
       </select>
-      <label style="font-size:12px; color:var(--ink-dim);">Kontrol N (NRL/ML/MB/IDX) =</label>
+      <label style="font-size:12px; color:var(--ink-dim);">Kontrol(NMI)=</label>
       <select id="fxControlN" class="fxSelect">
         <option value="3">3</option>
         <option value="5">5</option>
@@ -538,7 +538,7 @@
   <div class="tabpanel active" data-tab="jumlahselisih">
     <div class="sectionToggle" id="jsToggle">Analisis Jumlah & Selisih <span class="toggleIcon" id="jsToggleIcon">▾</span></div>
     <div id="jsWrap" style="display:block;">
-      <p class="hint" style="margin-top:0;">Cara hitung: angka dipecah dulu jadi <b>AC, CK, KE</b> (3 pasangan digit), tiap pasangan dihitung Jumlah (=jumlah 2 digit mod 10) &amp; Selisih (=selisih mutlak 2 digit) → 1 angka 4D punya 3 nilai Jumlah &amp; 3 nilai Selisih. <b>Tiap baris tabel punya rekomendasi sendiri</b>, dihitung dari window data sebesar dropdown <b>Jumlah Baris Tabel</b> (persis seperti Analisis Angka Ikut 4D) — dicari kombinasi digit dengan <b>cakupan (cover) paling tinggi</b>, bukan sekadar top-frekuensi. <b>Status</b> dicek ke data setelahnya (baris di atasnya/lebih baru): <b>O</b> hanya kalau Jumlah <u>dan</u> Selisih dua-duanya kena; kalau cuma salah satu, tetap <b>X</b>. Digit yang cocok ditandai hijau. <b>Wait</b> = baris teratas, belum ada data setelahnya untuk dicek.</p>
+      <p class="hint" style="margin-top:0;">Pangkas berdasarkan Jumlah&selisih per AC, CK, KE.</p>
 
       <div class="row" style="margin-top:2px; margin-bottom:2px; gap:10px;">
         <div style="flex:1; min-width:140px;">
