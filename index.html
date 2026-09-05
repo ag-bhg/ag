@@ -463,7 +463,7 @@
   <div class="card" id="resultCard" style="display:none;">
     <div class="sectionToggle" id="fxCardToggle">Formula X — Rekomendasi Tren per Posisi <span class="toggleIcon" id="fxCardToggleIcon">▾</span></div>
     <div id="fxCardWrap" style="display:block;">
-    <p class="hint" style="margin-top:0;">Lima formula dasar (NORMAL, MISTIK LAMA, MISTIK BARU, INDEX, BHG/Naik4Turun3) diuraikan jadi beberapa varian sumber per posisi. Tiap varian diuji akurasi trennya di data terakhir, lalu diurutkan dari yang paling akurat. Khusus PK dan BHG, jendela data diatur otomatis (baca 19–29 data terbaru); hasilnya baru muncul kalau data tersedia minimal 19.</p>
+    <p class="hint" style="margin-top:0;">Lima formula dasar untuk menentukan Pola.</p>
     <div class="row" style="margin-top:0;">
       <label style="font-size:12px; color:var(--ink-dim);">Jendela tren N =</label>
       <select id="fxTrendN" class="fxSelect">
@@ -494,9 +494,9 @@
       <button class="btn primary" id="fxRecalcBtn">🔁 Hitung Ulang</button>
     </div>
     <div class="row" style="margin-top:8px;">
-      <button class="btn" id="fxOptWilsonBtn">🎯 Pilih N (Wilson Score)</button>
-      <button class="btn" id="fxOptWalkBtn">🔄 Pilih N (Walk-Forward)</button>
-      <button class="btn" id="fxOptEnsembleBtn">🗳️ Pilih N (Ensemble)</button>
+      <button class="btn" id="fxOptWilsonBtn">🎯(Wilson Score)</button>
+      <button class="btn" id="fxOptWalkBtn">🔄(Walk-Forward)</button>
+      <button class="btn" id="fxOptEnsembleBtn">🗳️(Ensemble)</button>
     </div>
     <div class="fxOptLoading" id="fxOptLoading"><span class="fxSpinner"></span><span id="fxOptLoadingText">Menghitung...</span></div>
     <p class="hint" id="fxStatus" style="margin:8px 0 0; min-height:14px;"></p>
@@ -538,7 +538,7 @@
   <div class="tabpanel active" data-tab="jumlahselisih">
     <div class="sectionToggle" id="jsToggle">Analisis Jumlah & Selisih <span class="toggleIcon" id="jsToggleIcon">▾</span></div>
     <div id="jsWrap" style="display:block;">
-      <p class="hint" style="margin-top:0;">Cara hitung: angka 4D dipecah dulu jadi <b>AC, CK, KE</b> (3 pasangan digit), tiap pasangan dihitung Jumlah (=jumlah 2 digit mod 10) &amp; Selisih (=selisih mutlak 2 digit) → 1 angka 4D punya 3 nilai Jumlah &amp; 3 nilai Selisih. <b>Tiap baris tabel punya rekomendasi sendiri</b>, dihitung dari window data sebesar dropdown <b>Jumlah Baris Tabel</b> (persis seperti Analisis Angka Ikut 4D) — dicari kombinasi digit dengan <b>cakupan (cover) paling tinggi</b>, bukan sekadar top-frekuensi. <b>Status</b> dicek ke data setelahnya (baris di atasnya/lebih baru): <b>O</b> hanya kalau Jumlah <u>dan</u> Selisih dua-duanya kena; kalau cuma salah satu, tetap <b>X</b>. Digit yang cocok ditandai hijau. <b>Wait</b> = baris teratas, belum ada data setelahnya untuk dicek.</p>
+      <p class="hint" style="margin-top:0;">Cara hitung: angka dipecah dulu jadi <b>AC, CK, KE</b> (3 pasangan digit), tiap pasangan dihitung Jumlah (=jumlah 2 digit mod 10) &amp; Selisih (=selisih mutlak 2 digit) → 1 angka 4D punya 3 nilai Jumlah &amp; 3 nilai Selisih. <b>Tiap baris tabel punya rekomendasi sendiri</b>, dihitung dari window data sebesar dropdown <b>Jumlah Baris Tabel</b> (persis seperti Analisis Angka Ikut 4D) — dicari kombinasi digit dengan <b>cakupan (cover) paling tinggi</b>, bukan sekadar top-frekuensi. <b>Status</b> dicek ke data setelahnya (baris di atasnya/lebih baru): <b>O</b> hanya kalau Jumlah <u>dan</u> Selisih dua-duanya kena; kalau cuma salah satu, tetap <b>X</b>. Digit yang cocok ditandai hijau. <b>Wait</b> = baris teratas, belum ada data setelahnya untuk dicek.</p>
 
       <div class="row" style="margin-top:2px; margin-bottom:2px; gap:10px;">
         <div style="flex:1; min-width:140px;">
