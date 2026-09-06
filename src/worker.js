@@ -178,6 +178,20 @@ function findEntryKeyByName(savedData, kode) {
 
 // ============================================================
 // BAGIAN 5 — Handler utama, dipanggil tiap cron trigger jalan
+//
+// PENTING SOAL URUTAN (diperbaiki):
+// Data yang sudah tersimpan di Firebase (hasil paste manual dari S1
+// dulu) urutannya DESCENDING -- baris teratas = draw TERBARU, makin
+// ke bawah makin lama. Ini konvensi yang dipakai S1 untuk nentuin
+// "data paling baru" (selalu baca baris PALING ATAS).
+//
+// Baris baru dari Neon HARUS masuk di ATAS (bukan di bawah!), dan
+// urutannya sendiri juga descending (kalau ada >1 baris baru,
+// yang paling baru taruh paling atas di antara baris-baris baru itu).
+//
+// grouped[kode] datang dari query "ORDER BY sort_key ASC" (ascending,
+// lama->baru), jadi sebelum digabung ke depan data lama, urutannya
+// DIBALIK dulu (.reverse()) supaya jadi descending juga.
 // ============================================================
 
 async function runSync(env) {
@@ -199,23 +213,35 @@ async function runSync(env) {
     }
 
     const existingKeys = parseExistingKeys(found.entry.data || '');
-    const newLines = [];
+    const newLinesAscending = []; // sementara masih urutan lama->baru (dari query)
     for (const row of grouped[kode]) {
       const k = `${String(row.tanggal).trim()}|${String(row.periode).trim()}`;
       if (!existingKeys.has(k)) {
-        newLines.push(`${row.tanggal}\t${row.periode}\t${row.nomor}`);
+        newLinesAscending.push(`${row.tanggal}\t${row.periode}\t${row.nomor}`);
       }
     }
 
-    if (newLines.length === 0) {
+    if (newLinesAscending.length === 0) {
       summary.push(`${kode}: sudah update, tidak ada data baru`);
       continue;
     }
 
+    // Balik jadi descending (baru->lama) supaya baris paling baru
+    // ada paling atas di antara baris-baris baru ini sendiri.
+    const newLinesDescending = newLinesAscending.slice().reverse();
+
     const oldData = (found.entry.data || '').trim();
-    const combined = oldData ? `${oldData}\n${newLines.join('\n')}` : newLines.join('\n');
+
+    // Baris baru ditaruh DI ATAS data lama (bukan di bawah seperti
+    // sebelumnya) -- supaya urutan keseluruhan tetap descending
+    // (terbaru selalu di paling atas), konsisten dengan cara S1
+    // membaca "data terbaru".
+    const combined = oldData
+      ? `${newLinesDescending.join('\n')}\n${oldData}`
+      : newLinesDescending.join('\n');
+
     updates[`${FIREBASE_DATA_PATH}/${found.key}/data`] = combined;
-    summary.push(`${kode}: +${newLines.length} baris baru ditambahkan`);
+    summary.push(`${kode}: +${newLinesAscending.length} baris baru ditambahkan (di atas)`);
   }
 
   if (Object.keys(updates).length > 0) {
@@ -223,6 +249,132 @@ async function runSync(env) {
   }
 
   console.log('[auto-sync]', summary.join(' | '));
+  return summary;
+}
+
+// ============================================================
+// BAGIAN 6 — CLEANUP SATU KALI untuk entry yang SUDAH KEBURU
+// BERANTAKAN (baris baru numpuk di bawah sebelum fix ini ada)
+//
+// Yang dilakukan:
+// 1. Ambil semua entry savedData
+// 2. Parse tiap baris jadi {tanggal, periode, nomor}
+// 3. Sort ulang descending berdasarkan tanggal + nomor urut periode
+//    (bukan cuma string tanggal -- supaya "31-08" vs "01-09" ke-
+//    urut benar berdasarkan waktu asli, bukan alfabet)
+// 4. Buang duplikat (key tanggal+periode sama)
+// 5. Tulis balik ke Firebase
+//
+// Aman dijalankan berkali-kali (idempotent) -- kalau data sudah
+// rapi, hasil sort ulang akan identik dengan yang sudah ada.
+// ============================================================
+
+function parseLineToObj(line) {
+  const cols = line.split('\t');
+  if (cols.length < 3) return null;
+  const [tanggal, periode, nomor] = cols;
+  // tanggal format "DD-MM-YYYY" -> dibuat sortable "YYYY-MM-DD"
+  const m = String(tanggal).trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!m) return null;
+  const sortableDate = `${m[3]}-${m[2]}-${m[1]}`; // YYYY-MM-DD
+
+  // Ambil nomor urut dari periode (mis. "VTM-616" -> 616), dipakai
+  // sebagai tie-breaker kalau tanggalnya sama (misal pasaran KK yang
+  // 2x sehari, atau format tanpa strip "VTM616").
+  const urutMatch = String(periode).trim().match(/(\d+)\s*$/);
+  const urutan = urutMatch ? parseInt(urutMatch[1], 10) : 0;
+
+  return {
+    tanggal: String(tanggal).trim(),
+    periode: String(periode).trim(),
+    nomor: String(nomor).trim(),
+    sortableDate,
+    urutan,
+    raw: `${tanggal.trim()}\t${periode.trim()}\t${nomor.trim()}`
+  };
+}
+
+function sortDataStringDescending(dataString) {
+  if (!dataString || !dataString.trim()) return dataString;
+
+  const lines = dataString.split(/\n+/).map(l => l.trim()).filter(Boolean);
+  const parsed = [];
+  const skipped = [];
+
+  for (const line of lines) {
+    const obj = parseLineToObj(line);
+    if (obj) parsed.push(obj);
+    else skipped.push(line); // baris yang tidak bisa diparse (format lama/aneh) -- dipertahankan, ditaruh di akhir
+  }
+
+  // Dedup by tanggal+periode, simpan yang pertama ditemukan
+  const seen = new Set();
+  const deduped = [];
+  for (const obj of parsed) {
+    const key = `${obj.tanggal}|${obj.periode}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(obj);
+  }
+
+  // Sort descending: tanggal terbaru dulu, lalu urutan periode terbesar dulu
+  deduped.sort((a, b) => {
+    if (a.sortableDate !== b.sortableDate) {
+      return a.sortableDate < b.sortableDate ? 1 : -1;
+    }
+    return b.urutan - a.urutan;
+  });
+
+  const sortedLines = deduped.map(o => o.raw);
+  return [...sortedLines, ...skipped].join('\n');
+}
+
+async function runCleanupOrder(env) {
+  const dbUrl = await env.DATABASE_URL_SECRET.get();
+  const sql = neon(dbUrl);
+
+  const token = await getFirebaseAccessToken(sql);
+  const savedData = await firebaseGetSavedData(token);
+
+  if (!savedData) {
+    return ['Tidak ada data di savedData'];
+  }
+
+  const entries = Array.isArray(savedData)
+    ? savedData.map((entry, idx) => ({ key: idx, entry }))
+    : Object.entries(savedData).map(([key, entry]) => ({ key, entry }));
+
+  const summary = [];
+  const updates = {};
+
+  for (const { key, entry } of entries) {
+    if (!entry || typeof entry.data !== 'string' || !entry.name) {
+      continue;
+    }
+
+    const before = entry.data;
+    const after = sortDataStringDescending(before);
+
+    if (before === after) {
+      summary.push(`${entry.name}: sudah rapi, tidak diubah`);
+      continue;
+    }
+
+    updates[`${FIREBASE_DATA_PATH}/${key}/data`] = after;
+
+    const beforeLines = before.split(/\n+/).filter(Boolean).length;
+    const afterLines = after.split(/\n+/).filter(Boolean).length;
+    summary.push(
+      `${entry.name}: diurutkan ulang (${beforeLines} -> ${afterLines} baris` +
+      (beforeLines !== afterLines ? ', ada duplikat dibuang' : '') + ')'
+    );
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await firebaseMultiUpdate(token, updates);
+  }
+
+  console.log('[cleanup-order]', summary.join(' | '));
   return summary;
 }
 
@@ -251,6 +403,18 @@ export default {
     if (url.pathname === '/api/sync-now') {
       try {
         const summary = await runSync(env);
+        return Response.json({ ok: true, summary });
+      } catch (e) {
+        return Response.json({ ok: false, error: String(e) }, { status: 500 });
+      }
+    }
+
+    // Endpoint SATU KALI untuk merapikan entry yang sudah keburu berantakan
+    // (baris baru numpuk di bawah, dari sebelum runSync() diperbaiki).
+    // Aman dipanggil berkali-kali -- kalau sudah rapi, tidak ada perubahan.
+    if (url.pathname === '/api/fix-order') {
+      try {
+        const summary = await runCleanupOrder(env);
         return Response.json({ ok: true, summary });
       } catch (e) {
         return Response.json({ ok: false, error: String(e) }, { status: 500 });
