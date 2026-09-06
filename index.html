@@ -1108,6 +1108,8 @@ const DIGIT_MAPS = {
 // ---------- Formula X: state ----------
 let FX_RECOMMENDATIONS = null; // { posLabel: [{key,label,source,pct,hit,total}, ...] } terurut dari akurasi tertinggi
 let FX_SELECTED = {};          // posLabel -> key varian yang dipilih (radio)
+let FX_TOUCHED = {};           // posLabel -> true kalau radio pernah digeser MANUAL oleh user (dipakai Gen 2 untuk tahu beda
+                                // antara "masih default" vs "sudah dipilih sendiri") — direset tiap computeFormulaX()/ganti data.
 let TOP_POSISI_SELECTED = {};  // posLabel -> 'kuat' | 'sedang' (radio Top Posisi)
 let FX_FORMULAS_CACHE = null;  // { formulas, controlN } — daftar formula terakhir dipakai computeFormulaX(), dipakai ulang oleh fxApplyToGenerator()
 let FX_OUT_N = 8;              // OUT= jumlah digit kandidat per pool (dulu tetap 8, sekarang bisa 4-9 lewat dropdown #fxOutN)
@@ -1457,6 +1459,7 @@ function computeFormulaX(used, posLabels){
   // (Hitung Ulang, Pilih N Wilson, Pilih N Walk-Forward, Pilih N Ensemble) — tidak mempertahankan pilihan lama.
   posLabels.forEach(label => {
     FX_SELECTED[label] = recs[label][0] ? recs[label][0].key : null;
+    FX_TOUCHED[label] = false; // reset penanda "sudah dipilih manual" tiap hitung ulang
   });
 
   renderFormulaX(posLabels);
@@ -1503,6 +1506,7 @@ function renderFormulaX(posLabels){
       radio.checked = (opt.key === FX_SELECTED[label]);
       radio.addEventListener('change', () => {
         FX_SELECTED[label] = opt.key;
+        FX_TOUCHED[label] = true; // tandai posisi ini sudah dipilih manual -> Gen 2 ikut radio mulai sekarang
         renderFxTrendNumbers(posLabels, lastHistoryNumbers);
         renderFxBacktestTable(posLabels, lastHistoryNumbers);
         fxApplyToGenerator(true);
@@ -1984,6 +1988,7 @@ function analyze(){
     lastHistoryNumbers = [];
     FX_RECOMMENDATIONS = null;
     FX_SELECTED = {};
+    FX_TOUCHED = {};
     FX_FORMULAS_CACHE = null;
     TOP_POSISI_SELECTED = {};
     document.getElementById('fxCols').innerHTML = '';
@@ -3296,6 +3301,7 @@ document.getElementById('filterCopyBtn').addEventListener('click', () => {
 function resetAllSettings(){
   // Formula X & Top Posisi: kosongkan pilihan supaya balik ke rekomendasi teratas (default) saat dihitung ulang.
   FX_SELECTED = {};
+  FX_TOUCHED = {};
   TOP_POSISI_SELECTED = {};
   // Jendela Tren N & Kontrol N balik ke nilai standar.
   const trendSel = document.getElementById('fxTrendN');
@@ -4757,18 +4763,19 @@ function fxBuildGen2Pools(posLabels, used){
   for(let i=0; i<posLabels.length; i++){
     const recs = FX_RECOMMENDATIONS[posLabels[i]] || [];
     if(!recs.length){ pools.push([]); continue; }
-    // Cerminkan rangking yang dipilih Gen 1 (FX_SELECTED) dari ujung sebaliknya:
-    // pilih rangking #1 (terbaik, default) -> Gen 2 ambil rangking TERAKHIR (terburuk),
-    // sama seperti standar sebelumnya. Makin rangking Gen 1 digeser ke tengah, Gen 2 ikut
-    // bergeser mendekati tengah dari ujung berlawanan. Dengan begini Gen 2 SELALU ikut
-    // berubah tiap radio Formula X diganti — sebelumnya cuma berubah kalau varian yang
-    // dipilih Gen 1 kebetulan sama dengan varian terburuk itu sendiri.
-    const selectedKey = FX_SELECTED[posLabels[i]];
-    let selIdx = recs.findIndex(r => r.key === selectedKey);
-    if(selIdx === -1) selIdx = 0;
-    const mirrorIdx = Math.max(0, recs.length - 1 - selIdx);
-    const worst = recs[mirrorIdx];
-    const f = byKey[worst.key];
+    // Default Gen 2 = rangking TERAKHIR (terburuk), persis seperti semula. Tapi begitu radio
+    // Formula X di posisi ini pernah digeser manual (FX_TOUCHED), Gen 2 ikut pilihan itu apa
+    // adanya — sama seperti Gen 1 mengikuti radio — sesuai pola di "Angka Hasil Tren" (default
+    // tampil satu set, begitu user memilih, tampilan ganti ikut pilihan).
+    const label = posLabels[i];
+    let chosenRec;
+    if(FX_TOUCHED[label]){
+      const selectedKey = FX_SELECTED[label];
+      chosenRec = recs.find(r => r.key === selectedKey) || recs[recs.length-1];
+    } else {
+      chosenRec = recs[recs.length-1];
+    }
+    const f = byKey[chosenRec.key];
     let pool = [];
     if(f){ try{ pool = f.fn(used)[i]||[]; }catch(e){} }
     pools.push(pool);
