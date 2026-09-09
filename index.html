@@ -180,9 +180,12 @@
             <option value="100">100</option>
           </select>
         </div>
-        <div style="flex:1; min-width:140px;">
-          <label style="display:block; font-size:10.5px; color:var(--ink-dim); margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em; text-align:center;">Jumlah Rekomendasi</label>
-          <select id="jsRecoCount" class="aiWinSelect" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:13px; font-weight:700; padding:8px 4px; border-radius:8px; text-align:center;">
+      </div>
+
+      <div class="row" style="margin-top:2px; margin-bottom:10px; gap:10px;">
+        <div style="flex:1; min-width:120px;">
+          <label style="display:block; font-size:10.5px; color:var(--ink-dim); margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em; text-align:center;">Jumlah</label>
+          <select id="jsRecoCountJumlah" class="aiWinSelect" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:12px; font-weight:700; padding:6px 4px; border-radius:8px; text-align:center; margin-bottom:6px;">
             <option value="2">2</option>
             <option value="3">3</option>
             <option value="4">4</option>
@@ -190,17 +193,19 @@
             <option value="6">6</option>
             <option value="7">7</option>
           </select>
-        </div>
-      </div>
-
-      <div class="row" style="margin-top:2px; margin-bottom:10px; gap:10px;">
-        <div style="flex:1; min-width:120px;">
-          <label style="display:block; font-size:10.5px; color:var(--ink-dim); margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em; text-align:center;">Jumlah</label>
           <input type="text" id="jsJumlahManual" class="aiWinManual" placeholder="Jumlah manual (opsional)" maxlength="10" inputmode="numeric" autocomplete="off">
           <button class="btn" id="cariJumlahBtn" style="width:100%; margin-top:6px; font-size:12px; padding:6px 4px;">🔎 Cari Jumlah (cover data)</button>
         </div>
         <div style="flex:1; min-width:120px;">
           <label style="display:block; font-size:10.5px; color:var(--ink-dim); margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em; text-align:center;">Selisih</label>
+          <select id="jsRecoCountSelisih" class="aiWinSelect" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:12px; font-weight:700; padding:6px 4px; border-radius:8px; text-align:center; margin-bottom:6px;">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5" selected>5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+          </select>
           <input type="text" id="jsSelisihManual" class="aiWinManual" placeholder="Selisih manual (opsional)" maxlength="10" inputmode="numeric" autocomplete="off">
           <button class="btn" id="cariSelisihBtn" style="width:100%; margin-top:6px; font-size:12px; padding:6px 4px;">🔎 Cari Selisih (cover data)</button>
         </div>
