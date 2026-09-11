@@ -6,6 +6,13 @@ import { neon } from '@neondatabase/serverless';
 const FIREBASE_DB_URL = 'https://analisa-frekuensi-default-rtdb.asia-southeast1.firebasedatabase.app';
 const FIREBASE_DATA_PATH = 'savedData';
 
+// Path & limit ini SENGAJA disamakan persis dengan historyall.js di S1
+// (ALLP_HISTORY_PATH / ALLP_HISTORY_LIMIT) -- tabel "Histori All Periode"
+// di S1 cuma baca node ini, jadi format record harus identik:
+// {jam, tanggal, pasaran, periode, nomor}, terbaru di index 0, maks 190.
+const ALLP_HISTORY_PATH = 'allPeriodeHistory';
+const ALLP_HISTORY_LIMIT = 190;
+
 // ============================================================
 // BAGIAN 1 — Generate Google OAuth access token dari Service Account
 // (dibutuhkan supaya Worker bisa menulis ke Firebase Realtime Database
@@ -96,6 +103,26 @@ async function firebaseGetSavedData(token) {
   });
   if (!resp.ok) throw new Error('Gagal baca savedData: ' + resp.status);
   return resp.json(); // bisa null, array, atau object (tergantung isi Firebase)
+}
+
+// Jam WIB format "12.45" (titik, bukan titik dua) -- sama persis dengan
+// allpJamWib() di historyall.js (S1), supaya format kolom Jam konsisten
+// baik ditulis dari sini (Worker) maupun (kalau masih aktif) dari client.
+function jamWibNow() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date());
+  const get = key => parts.find(p => p.type === key)?.value || '00';
+  return `${get('hour')}.${get('minute')}`;
+}
+
+async function firebaseGetAllPeriodeHistory(token) {
+  const resp = await fetch(`${FIREBASE_DB_URL}/${ALLP_HISTORY_PATH}.json`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!resp.ok) throw new Error('Gagal baca allPeriodeHistory: ' + resp.status);
+  const val = await resp.json();
+  return Array.isArray(val) ? val.filter(Boolean) : [];
 }
 
 async function firebaseUpdateEntryData(token, entryKey, newDataString) {
@@ -205,6 +232,11 @@ async function runSync(env) {
   const summary = [];
   const updates = {}; // path -> value, dikirim sekaligus di akhir
 
+  // Baris genuinely baru dari SEMUA kode di siklus ini, dikumpulkan dulu di
+  // sini -- baru digabung ke /allPeriodeHistory SATU KALI di akhir (supaya
+  // tetap 1 PATCH request, tidak nambah round-trip per kode).
+  const allpNewRecords = [];
+
   for (const kode of Object.keys(grouped)) {
     const found = findEntryKeyByName(savedData, kode);
     if (!found) {
@@ -213,24 +245,30 @@ async function runSync(env) {
     }
 
     const existingKeys = parseExistingKeys(found.entry.data || '');
-    const newLinesAscending = []; // sementara masih urutan lama->baru (dari query)
+    const newRows = []; // objek row Postgres (bukan string) -- dipakai juga utk Histori All Periode
     for (const row of grouped[kode]) {
       const k = `${String(row.tanggal).trim()}|${String(row.periode).trim()}`;
       if (!existingKeys.has(k)) {
-        newLinesAscending.push(`${row.tanggal}\t${row.periode}\t${row.nomor}`);
+        newRows.push(row);
       }
     }
 
-    if (newLinesAscending.length === 0) {
+    if (newRows.length === 0) {
       summary.push(`${kode}: sudah update, tidak ada data baru`);
       continue;
     }
 
     // Balik jadi descending (baru->lama) supaya baris paling baru
     // ada paling atas di antara baris-baris baru ini sendiri.
-    const newLinesDescending = newLinesAscending.slice().reverse();
+    const newRowsDescending = newRows.slice().reverse();
+    const newLinesDescending = newRowsDescending.map(r => `${r.tanggal}\t${r.periode}\t${r.nomor}`);
 
     const oldData = (found.entry.data || '').trim();
+    // Entry ini baru PERTAMA KALI diisi (belum pernah ada data sebelumnya) --
+    // seluruh newRows di sini adalah backlog awal (bisa ratusan baris
+    // sekaligus), BUKAN draw baru yang baru saja keluar. Jangan dicatat ke
+    // Histori All Periode supaya tabel itu tidak langsung banjir data lama.
+    const isFirstPopulate = !oldData;
 
     // Baris baru ditaruh DI ATAS data lama (bukan di bawah seperti
     // sebelumnya) -- supaya urutan keseluruhan tetap descending
@@ -241,7 +279,39 @@ async function runSync(env) {
       : newLinesDescending.join('\n');
 
     updates[`${FIREBASE_DATA_PATH}/${found.key}/data`] = combined;
-    summary.push(`${kode}: +${newLinesAscending.length} baris baru ditambahkan (di atas)`);
+    summary.push(`${kode}: +${newRows.length} baris baru ditambahkan (di atas)`);
+
+    if (isFirstPopulate) {
+      summary.push(`${kode}: backlog awal (${newRows.length} baris) tidak dicatat ke Histori All Periode`);
+      continue;
+    }
+
+    // Catat SETIAP baris baru (bukan cuma yang paling akhir) -- beda dari
+    // pendekatan client (historyall.js) sebelumnya yang cuma bisa nangkap
+    // 1 perubahan per polling snapshot, jadi draw yang numpuk di antara 2
+    // kali cek bisa lewat. Di sini kita punya daftar baris baru per-baris
+    // langsung dari diff Neon, jadi tidak ada yang lewat.
+    for (const row of newRows) {
+      allpNewRecords.push({
+        jam: jamWibNow(),
+        tanggal: row.tanggal,
+        pasaran: kode,
+        periode: row.periode,
+        nomor: row.nomor
+      });
+    }
+  }
+
+  if (allpNewRecords.length > 0) {
+    // allpNewRecords urutannya masih per-kode (ascending dalam tiap kode,
+    // tapi antar-kode ikut urutan Object.keys). Dibalik dulu per-kumpulan
+    // supaya baris yang ditambahkan TERAKHIR dalam loop tetap konsisten
+    // "terbaru di depan" pada level gabungan -- cukup baik untuk tabel ini
+    // (bukan sumber analisis presisi tinggi, cuma log aktivitas).
+    const existingHistory = await firebaseGetAllPeriodeHistory(token);
+    const combinedHistory = [...allpNewRecords.reverse(), ...existingHistory].slice(0, ALLP_HISTORY_LIMIT);
+    updates[ALLP_HISTORY_PATH] = combinedHistory;
+    summary.push(`Histori All Periode: +${allpNewRecords.length} baris baru dicatat`);
   }
 
   if (Object.keys(updates).length > 0) {
