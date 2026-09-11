@@ -100,6 +100,15 @@ function buildRekapEntry(){
   if(document.getElementById('filterHapus34')?.checked) twin.push('hapus 3-4');
   if(document.getElementById('twinModeExclude')?.checked) twin.push('hapus twin');
 
+  // ── BARU: catat pola twin murni yang dicentang (AABC, ABAC, dll) ──
+  const twinMurniPairs = (typeof getSelectedTwinMurniPairs === 'function')
+    ? getSelectedTwinMurniPairs() : [];
+  const twinMurniLabels = twinMurniPairs.map(([i, j]) => {
+    const key = `${i}-${j}`;
+    return (typeof TWIN_MURNI_LABELS_4D !== 'undefined' && TWIN_MURNI_LABELS_4D[key])
+      ? TWIN_MURNI_LABELS_4D[key] : `Digit ke-${i+1}&ke-${j+1}`;
+  }); // mis. ['AABC','ABAC']
+
   // ── BARU: filter checkbox tambahan yang sebelumnya belum tercatat ──
   const extraFlags = [];
   if(document.getElementById('filterShortAC')?.checked) extraFlags.push('Short AC');
@@ -183,6 +192,7 @@ function buildRekapEntry(){
     aiAC, aiCK, aiKE,
     jumlah, selisih,
     shio, twin,
+    twinMurniLabels,  // pola twin murni yang dicentang, mis. ['AABC','ABAC']
     hasil: null,
     ts: Date.now()
   };
@@ -194,7 +204,9 @@ function rekapEntryText(entry){
     ? entry.fxLabels.map((l, i) => `${l}: ${entry.fxPools[i] || '-'}`).join(' | ')
     : '-';
   const shioLine = (entry.shio && entry.shio.length) ? entry.shio.join(',') : '-';
-  const twinLine = (entry.twin && entry.twin.length) ? entry.twin.join(' | ') : '-';
+  const twinParts = [...(entry.twin || [])];
+  if(entry.twinMurniLabels && entry.twinMurniLabels.length) twinParts.push(...entry.twinMurniLabels);
+  const twinLine = twinParts.length ? twinParts.join(' | ') : '-';
   const extraLine = (entry.extraFlags && entry.extraFlags.length) ? entry.extraFlags.join(' | ') : '-';
 
   // Gen2: satu baris per slot (a/b/c), angka BAHAN mentah saja — bukan digabung, bukan angka jadi.
@@ -296,19 +308,24 @@ function rekapEntryHtmlHighlighted(entry, resultDigits){
   const aiKEColored = entry.aiKE ? rekapColorDigits(esc(entry.aiKE), keHit, 'rekapHitGreen') : '-';
   const aiColored   = entry.ai   ? rekapColorDigits(esc(entry.ai),   aiHit, 'rekapHitGreen') : '-';
 
-  // Jumlah & Selisih: hijau di nilai target yang cocok salah satu dari 3 nilai (AC/CK/KE) hasil.
+  // Jumlah & Selisih: hijau di digit filter yang cocok dengan nilai jumlah/selisih yang dihitung dari hasil.
+  // Contoh: hasil=8431 → jumlah AC/CK/KE = 2,7,4 → selisih AC/CK/KE = 4,1,2
+  // Filter Jumlah "012459": digit 2✅4✅ hijau, 7 tidak ada di filter → tidak hijau
+  // Filter Selisih "1468": digit 1✅4✅ hijau, 2 tidak ada di filter → tidak hijau
   const d4 = resultDigits.A + resultDigits.C + resultDigits.K + resultDigits.E;
   const { jumlahList, selisihList } = jumlahSelisihList(d4);
   const jumlahSet  = new Set(jumlahList.map(String));
   const selisihSet = new Set(selisihList.map(String));
   const colorList = (raw, hitValueSet) => {
     if(!raw) return '-';
-    return raw.split(',').map(v => {
+    // raw bisa berformat "1468" (tanpa koma) atau "1,4,6,8" (dengan koma)
+    const items = raw.includes(',') ? raw.split(',') : raw.split('');
+    return items.map(v => {
       const t = v.trim();
       return hitValueSet.has(t) ? `<span class="rekapHitGreen">${esc(t)}</span>` : esc(t);
-    }).join(',');
+    }).join(raw.includes(',') ? ',' : '');
   };
-  const jumlahColored  = colorList(entry.jumlah, jumlahSet);
+  const jumlahColored  = colorList(entry.jumlah,  jumlahSet);
   const selisihColored = colorList(entry.selisih, selisihSet);
 
   // Gen2: merah HANYA kalau ada slot 2A/2B/2C yang terkunci — live (belum dikunci) tidak diwarnai.
@@ -326,8 +343,111 @@ function rekapEntryHtmlHighlighted(entry, resultDigits){
     ];
   }
 
-  const shioLine  = (entry.shio && entry.shio.length) ? esc(entry.shio.join(',')) : '-';
-  const twinLine  = (entry.twin && entry.twin.length) ? esc(entry.twin.join(' | ')) : '-';
+  // Shio: hijau jika shio tersebut mengandung 2 digit terakhir angka hasil.
+  // Tabel shio: nomor shio (1-12) → daftar 2 digit terakhir yang masuk shio itu.
+  const SHIO_TABLE = {
+    1:  ['01','13','25','37','49','61','73','85','97'],
+    2:  ['02','14','26','38','50','62','74','86','98'],
+    3:  ['03','15','27','39','51','63','75','87','99'],
+    4:  ['04','16','28','40','52','64','76','88','00'],
+    5:  ['05','17','29','41','53','65','77','89'],
+    6:  ['06','18','30','42','54','66','78','90'],
+    7:  ['07','19','31','43','55','67','79','91'],
+    8:  ['08','20','32','44','56','68','80','92'],
+    9:  ['09','21','33','45','57','69','81','93'],
+    10: ['10','22','34','46','58','70','82','94'],
+    11: ['11','23','35','47','59','71','83','95'],
+    12: ['12','24','36','48','60','72','84','96']
+  };
+  // Cari shio dari AC, CK, KE hasil — masing-masing dicek ke tabel shio.
+  // Contoh: hasil=8431 → AC=84, CK=43, KE=31 → shio 12, 7, 7 → hitShio={7,12}
+  const hasilShioSet = new Set();
+  const pairAC = resultDigits.A + resultDigits.C;
+  const pairCK = resultDigits.C + resultDigits.K;
+  const pairKE = resultDigits.K + resultDigits.E;
+  [pairAC, pairCK, pairKE].forEach(pair => {
+    for(const [shioNum, list] of Object.entries(SHIO_TABLE)){
+      if(list.includes(pair)){ hasilShioSet.add(String(shioNum)); break; }
+    }
+  });
+  // Warnai shio di filter yang shio-nya masuk ke hasilShioSet
+  const shioLine = (entry.shio && entry.shio.length)
+    ? entry.shio.map(s => {
+        const val = String(s).trim();
+        return hasilShioSet.has(val)
+          ? `<span class="rekapHitGreen">${esc(val)}</span>`
+          : esc(val);
+      }).join(',')
+    : '-';
+  // Twin: hijau = filter berhasil (hasil tidak melanggar), merah = filter gagal (hasil melanggar).
+  const hasilNum = String(entry.hasil || '').replace(/[^0-9]/g, '');
+  // Apakah hasil punya digit kembar (ada 2 digit yang sama)?
+  const hasilAdaKembar = new Set(hasilNum.split('')).size < hasilNum.length;
+  // Apakah hasil punya digit muncul 3x atau lebih?
+  const hasilAda34 = (() => {
+    const cnt = {};
+    hasilNum.split('').forEach(d => { cnt[d] = (cnt[d] || 0) + 1; });
+    return Object.values(cnt).some(c => c >= 3);
+  })();
+  // Apakah hasil pernah ada di riwayat data?
+  const hasilAdaDiRiwayat = Array.isArray(lastHistoryNumbers) && lastHistoryNumbers.includes(hasilNum);
+
+  // Cek pola twin murni: apakah hasil cocok salah satu pola yang dicentang?
+  const twinMurniLabels = entry.twinMurniLabels || [];
+  const TWIN_LABEL_TO_PAIR = { 'AABC':[0,1], 'ABAC':[0,2], 'ABCA':[0,3], 'BAAC':[1,2], 'BACA':[1,3], 'BCAA':[2,3] };
+  const hasilCocokTwinMurni = twinMurniLabels.length > 0 && twinMurniLabels.some(label => {
+    const pair = TWIN_LABEL_TO_PAIR[label];
+    if(!pair) return false;
+    const [i, j] = pair;
+    const d = hasilNum.split('');
+    if(d[i] !== d[j]) return false;
+    const rest = d.filter((_, k) => k !== i && k !== j);
+    return !rest.includes(d[i]) && new Set(rest).size === rest.length;
+  });
+
+  const colorTwin = (label, isViolation) => {
+    const cls = isViolation ? 'rekapHitRed' : 'rekapHitGreen';
+    return `<span class="${cls}">${esc(label)}</span>`;
+  };
+
+  const twinParts = [];
+  if(entry.twin && entry.twin.length){
+    entry.twin.forEach(t => {
+      if(t === 'hapus 3-4'){
+        // hijau jika hasil TIDAK ada digit 3-4, merah jika ada
+        twinParts.push(colorTwin(t, hasilAda34));
+      } else if(t === 'hapus twin'){
+        // hijau jika hasil TIDAK kembar, merah jika ada kembar
+        // tapi jika twinMurniLabels ada, cek spesifik polanya
+        if(twinMurniLabels.length > 0){
+          twinParts.push(colorTwin(t, hasilCocokTwinMurni));
+        } else {
+          twinParts.push(colorTwin(t, hasilAdaKembar));
+        }
+      } else if(t === 'angka yang sudah keluar'){
+        // hijau jika hasil TIDAK ada di riwayat, merah jika ada
+        twinParts.push(colorTwin(t, hasilAdaDiRiwayat));
+      } else {
+        twinParts.push(esc(t));
+      }
+    });
+  }
+  // Pola twin murni: hijau jika hasil TIDAK cocok pola, merah jika cocok (karena mode hapus)
+  twinMurniLabels.forEach(label => {
+    const pair = TWIN_LABEL_TO_PAIR[label];
+    let cocok = false;
+    if(pair){
+      const [i, j] = pair;
+      const d = hasilNum.split('');
+      if(d[i] === d[j]){
+        const rest = d.filter((_, k) => k !== i && k !== j);
+        cocok = !rest.includes(d[i]) && new Set(rest).size === rest.length;
+      }
+    }
+    twinParts.push(colorTwin(label, cocok));
+  });
+
+  const twinLine = twinParts.length ? twinParts.join(' | ') : '-';
   const extraLine = (entry.extraFlags && entry.extraFlags.length) ? esc(entry.extraFlags.join(' | ')) : '-';
   const basisLine = entry.lastDrawPeriode
     ? `Basis data: ${esc(entry.lastDrawPeriode)} → prediksi ${esc(entry.market)}`
