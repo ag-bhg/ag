@@ -314,22 +314,34 @@ function fxRunOptimizer(label, computeFn){
   }, 30);
 }
 
-// Radio "Sumber Data" (Formula X): Data Default = pakai lastHistoryNumbers apa adanya (snapshot
-// terakhir dari analyze()). Data Terbaru = parse ULANG isi #dataInput saat ini juga (logika sama
-// seperti analyze()) sebelum menghitung — supaya kalau Firebase sudah menyisipkan data baru di
-// belakang layar (live listener di database.js), Formula X langsung ikut memakainya tanpa perlu
-// ganti pasaran/periode. Menimpa lastHistoryNumbers/lastPosLabels supaya render lain (tabel
-// backtest, Angka Hasil Tren, dst) ikut konsisten.
+// Radio "Sumber Data" (Formula X):
+// - Data Default  = baca ULANG kotak Data Historis (#dataInput) langsung, sama seperti analyze() —
+//   jadi selalu ikut pasaran/periode yang lagi aktif di kotak itu, tidak pernah "nyangkut" ke data lama.
+// - Data Terbaru  = ambil dari tabel Histori All Periode (allPeriodeHistoryList, lihat historyall.js
+//   — gabungan SEMUA pasaran dari Firebase, terbaru di index 0). Dipakai APA ADANYA, semua baris lintas
+//   pasaran dicampur, TIDAK difilter ke pasaran yang aktif (sesuai keputusan user).
+// Menimpa lastHistoryNumbers/lastPosLabels supaya render lain (tabel backtest, Angka Hasil Tren, dst)
+// ikut konsisten.
 function fxRefreshHistoryIfTerbaru(){
+  const statusEl = document.getElementById('fxDataSourceStatus');
   const useTerbaru = (document.querySelector('input[name="fxDataSource"]:checked') || {}).value === 'terbaru';
-  if(!useTerbaru) return;
-  const raw = document.getElementById('dataInput').value;
-  const parsedWithMonth = parseDataWithMonth(raw);
-  const tokens = parsedWithMonth.tokens;
+  let tokens;
+  if(useTerbaru){
+    const rows = (typeof allPeriodeHistoryList !== 'undefined' && Array.isArray(allPeriodeHistoryList)) ? allPeriodeHistoryList : [];
+    tokens = rows.map(r => String((r && r.nomor) || '').replace(/[^0-9]/g, '')).filter(Boolean);
+  } else {
+    const raw = document.getElementById('dataInput').value;
+    tokens = parseDataWithMonth(raw).tokens;
+  }
+  if(!tokens.length){
+    if(statusEl) statusEl.textContent = useTerbaru
+      ? '⚠️ Tabel Histori All Periode masih kosong, pakai data sebelumnya.'
+      : '⚠️ Kotak Data Historis kosong/tidak terbaca, pakai data sebelumnya.';
+    return; // sumbernya kosong/tidak valid — biarkan snapshot lama, jangan ditimpa
+  }
   const targetLen = pickTargetLength(tokens);
-  const used = [];
-  tokens.forEach(t => { if(t.length === targetLen) used.push(t); });
-  if(!used.length) return; // data kosong/tidak valid — biarkan snapshot lama, jangan ditimpa
+  const used = tokens.filter(t => t.length === targetLen);
+  if(!used.length) return;
   const posLabels = targetLen === 4
     ? ['A','C','K','E']
     : targetLen === 3
@@ -337,7 +349,18 @@ function fxRefreshHistoryIfTerbaru(){
       : ['K','E'];
   lastHistoryNumbers = used;
   lastPosLabels = posLabels;
+  if(statusEl) statusEl.textContent = useTerbaru
+    ? `📡 Data Terbaru (Histori All Periode, semua pasaran) — ${used.length} angka.`
+    : `📄 Data Default (Data Historis) — ${used.length} angka.`;
 }
+
+// Klik radio langsung memicu refresh + hitung ulang (tidak perlu klik "Hitung Ulang" secara manual).
+document.querySelectorAll('input[name="fxDataSource"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    fxRefreshHistoryIfTerbaru();
+    if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
+  });
+});
 
 document.getElementById('fxOptWilsonBtn').addEventListener('click', () => {
   fxRefreshHistoryIfTerbaru();
