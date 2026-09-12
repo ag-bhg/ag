@@ -835,6 +835,12 @@ function applyTopPosisiToGenerator(){
 document.getElementById('topPosApplyBtn').addEventListener('click', applyTopPosisiToGenerator);
 document.getElementById('fxRecalcBtn').addEventListener('click', () => {
   fxRefreshHistoryIfTerbaru();
+  // Top Posisi (Kuat/Sedang) pakai state terpisah dari FX_SELECTED (lihat TOP_POSISI_SELECTED
+  // di atas) — computeFormulaX() TIDAK menyentuhnya, jadi kalau tidak dikosongkan di sini,
+  // pilihan "Sedang" yang sempat dipilih manual akan nyangkut terus walau sudah Hitung Ulang.
+  // Reset ini HANYA untuk tombol manual di menu Normal — Mode Auto tidak lewat sini sama sekali
+  // (lihat computeFormulaX() dipanggil langsung di automode.js), jadi tidak kena dampak.
+  TOP_POSISI_SELECTED = {};
   if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
 });
 
