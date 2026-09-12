@@ -620,7 +620,15 @@ async function runAutoPipelineAfterFormulaX(){
   // 0) Mode Auto (bukan Semi Auto): kunci Gen 1 otomatis dengan kandidat terbaik Formula X
   // (sesuai Out N preset) SEBELUM langkah lain jalan. Semi Auto dilewati karena Gen 1-nya
   // sudah dikunci manual dari Angka Bahan (fxGen1SemiAutoLocked) — tidak boleh ditimpa di sini.
+  //
+  // PENTING: analyze() SELALU parse ulang Data Historis (Default) tanpa peduli radio Sumber
+  // Data — jadi kalau radio lagi di "Data Terbaru", lastHistoryNumbers/FX_RECOMMENDATIONS di
+  // titik ini masih hasil Default. Panggil fxRefreshHistoryIfTerbaru() + computeFormulaX() dulu
+  // di sini supaya kalau radio memang "Data Terbaru", Gen 1 dikunci pakai data dari tabel
+  // Histori All Periode yang SEGAR — bukan diam-diam balik ke Data Historis tiap siklus auto.
   if(typeof getAppMode === 'function' && getAppMode() === 'auto'){
+    fxRefreshHistoryIfTerbaru();
+    if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
     fxAutoLockGen1BestCandidates();
   }
 
