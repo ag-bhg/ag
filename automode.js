@@ -3,7 +3,8 @@
 
 // ============================================================
 // AUTO GENERATOR FORMULA X — v3
-// Gen 1 : pool terbaik (% tertinggi), bisa dikunci
+// Gen 1 : pool sesuai FX_SELECTED (radio Formula X per posisi / Preset Aktif), bisa dikunci —
+//         default % tertinggi hanya kalau posisi itu belum pernah dipilih/disimpan di preset
 // Gen 2A/2B/2C : 3 slot filter eliminasi berlapis, masing-masing bisa dikunci
 // Auto-unlock semua saat pasaran berganti
 // ============================================================
@@ -17,8 +18,9 @@ let fxGen1LockedFP = '';
 // true kalau Gen 1 dikunci OTOMATIS oleh pipeline Mode Auto (bukan klik manual/Semi Auto) —
 // selama flag ini true, Gen 1 KEBAL terhadap fxAutoUnlockAll (tidak ikut dibuka walau
 // fingerprint data berubah karena periode baru). Tetap SELALU dihitung ulang & dikunci lagi
-// pakai kandidat terbaik terbaru tiap kali analyze() selesai di Mode Auto (lihat
-// fxAutoLockGen1BestCandidates) — jadi angkanya tetap segar tanpa pernah "lepas kunci".
+// tiap kali analyze() selesai di Mode Auto (lihat fxAutoLockGen1FromPreset) — sesuai FX_SELECTED
+// yang tersimpan di Preset Aktif (bukan lagi dipaksa rank #1) — jadi angkanya tetap segar
+// mengikuti preset tanpa pernah "lepas kunci".
 let fxGen1AutoLocked = false;
 
 // ── State Gen 2 (A/B/C) ──
@@ -35,13 +37,10 @@ function dataFingerprint(used){
   return used.length+'|'+used[0]+'|'+used[used.length-1];
 }
 
-// Build pool dari Formula X.
-// forceTopRank=true → SELALU pakai rangking #1 (akurasi tertinggi), abaikan FX_SELECTED
-// sepenuhnya — dipakai fxAutoLockGen1BestCandidates() (Mode Auto) supaya "kandidat terbaik"
-// benar oleh desain, bukan cuma kebetulan benar karena FX_SELECTED masih di rank #1 saat
-// dipanggil (rapuh terhadap urutan eksekusi kalau presetApplyExtraNow keburu menimpa
-// FX_SELECTED lewat hook MutationObserver sebelum titik ini sempat jalan).
-function fxBuildGen1Pools(posLabels, used, forceTopRank){
+// Build pool dari Formula X — selalu ikut FX_SELECTED (posisi/urutan radio Formula X per
+// posisi yang tersimpan di Preset Aktif / dipilih manual di panel Formula X), sama untuk
+// Mode Auto (lihat fxAutoLockGen1FromPreset) maupun tombol Lock Gen 1 manual.
+function fxBuildGen1Pools(posLabels, used){
   if(!FX_FORMULAS_CACHE || !FX_RECOMMENDATIONS) return null;
   const byKey = {};
   FX_FORMULAS_CACHE.formulas.forEach(f => { byKey[f.key]=f; });
@@ -49,16 +48,13 @@ function fxBuildGen1Pools(posLabels, used, forceTopRank){
   for(let i=0; i<posLabels.length; i++){
     const recs = FX_RECOMMENDATIONS[posLabels[i]] || [];
     if(!recs.length) return null;
-    let chosenRec;
-    if(forceTopRank){
-      chosenRec = recs[0];
-    } else {
-      // Pakai varian yang sedang DIPILIH manual di panel Formula X (FX_SELECTED) untuk
-      // posisi ini — supaya Gen 1 ikut berubah begitu radio diganti. Fallback ke rangking
-      // #1 (persentase tertinggi) kalau posisi ini belum pernah dipilih user sama sekali.
-      const selectedKey = FX_SELECTED[posLabels[i]];
-      chosenRec = recs.find(r => r.key === selectedKey) || recs[0];
-    }
+    // Pakai POSISI/URUTAN yang sedang DIPILIH manual di panel Formula X (FX_SELECTED, kini
+    // menyimpan INDEX urutan radio — bukan nama key) untuk posisi ini — supaya Gen 1 ikut
+    // berubah begitu radio diganti, dan preset ikut "posisi ke berapa yang disimpan", bukan
+    // "nama formula". Fallback ke rangking #1 (persentase tertinggi / index 0) kalau posisi
+    // ini belum pernah dipilih user sama sekali atau index-nya sudah tidak valid lagi.
+    const selIdx = FX_SELECTED[posLabels[i]];
+    const chosenRec = (typeof selIdx === 'number' && recs[selIdx]) ? recs[selIdx] : recs[0];
     const f = byKey[chosenRec.key];
     let pool = [];
     if(f){ try{ pool = f.fn(used)[i]||[]; }catch(e){} }
@@ -71,6 +67,13 @@ function fxBuildGen1Pools(posLabels, used, forceTopRank){
 // posisi Formula X yang dipilih manual (selected/touched). 2A = terburuk ke-1 (paling
 // buncit), 2B = terburuk ke-2, 2C = terburuk ke-3 — membentuk 3 lapis eliminasi yang
 // otomatis berbeda tanpa perlu geser radio manual.
+//
+// PENGECUALIAN (v2): kalau satu posisi punya persentase TERBURUK yang PALING KECIL
+// dibanding gabungan seluruh posisi lain (bukan cuma dibanding sesama posisinya sendiri),
+// posisi itu "dikunci" — dipaksa pakai formula terburuk ke-1 miliknya sendiri di KETIGA
+// slot (2A/2B/2C), tidak ikut naik ke rank ke-2/ke-3 seperti posisi lain. Lihat
+// fxFindGen2LockedPosition(). Kalau ada dasi (persentase sama persis di >1 posisi),
+// posisi yang urutannya lebih dulu di posLabels (mis. C sebelum K) yang menang.
 const WORST_RANK_BY_SLOT = { A: 1, B: 2, C: 3 };
 
 // Ambil formula dari daftar rekomendasi (sudah diurutkan dari akurasi TERTINGGI ke
@@ -82,19 +85,47 @@ function pickWorstRank(list, rank){
   return list[idx >= 0 ? idx : 0];
 }
 
+// Cari SATU posisi yang wajib dikunci ke formula terburuk-nya sendiri (rank 1) di semua
+// slot Gen 2 — yaitu posisi yang nilai TERBURUKNYA adalah yang PALING KECIL dari SELURUH
+// posisi (A+C+K+E digabung jadi satu, bukan per-posisi sendiri-sendiri). Rank-1 sebuah
+// posisi otomatis sudah jadi nilai terkecil DI POSISI ITU (list terurut tertinggi→terendah),
+// jadi cukup bandingkan rank-1 tiap posisi untuk dapat pemenang globalnya.
+// Dasi (persentase sama persis) dimenangkan oleh posisi yang index-nya lebih kecil di
+// posLabels (lebih dulu dalam urutan A-C-K-E).
+function fxFindGen2LockedPosition(posLabels, recsByLabel){
+  let winner = null; // { label, idx, pct, rec }
+  posLabels.forEach((label, idx) => {
+    const list = (recsByLabel && recsByLabel[label]) || [];
+    const rec = pickWorstRank(list, 1);
+    if(!rec) return;
+    if(!winner || rec.pct < winner.pct || (rec.pct === winner.pct && idx < winner.idx)){
+      winner = { label, idx, pct: rec.pct, rec };
+    }
+  });
+  return winner;
+}
+
+// Pilih rec (formula) satu posisi untuk satu slot Gen 2, dengan mempertimbangkan posisi
+// yang sedang terkunci global (dari fxFindGen2LockedPosition): posisi pemenang SELALU
+// pakai rank-1 di ketiga slot; posisi lain tetap ikut WORST_RANK_BY_SLOT seperti biasa.
+function fxPickGen2Rec(slot, label, list, lockedPosition){
+  const rank = (lockedPosition && lockedPosition.label === label) ? 1 : (WORST_RANK_BY_SLOT[slot] || 1);
+  return pickWorstRank(list, rank);
+}
+
 // Hitung pool Gen2 untuk SATU slot memakai Formula X yang SEDANG aktif/tampil di layar
 // (FX_RECOMMENDATIONS live) — dipakai saat tombol Kunci 2A/2B/2C diklik manual.
 function fxBuildGen2PoolsLive(slot, posLabels, used){
   if(!FX_FORMULAS_CACHE || !FX_RECOMMENDATIONS) return null;
   const byKey = {};
   FX_FORMULAS_CACHE.formulas.forEach(f => { byKey[f.key]=f; });
-  const rank = WORST_RANK_BY_SLOT[slot] || 1;
+  const lockedPosition = fxFindGen2LockedPosition(posLabels, FX_RECOMMENDATIONS);
   const pools = [];
   for(let i=0; i<posLabels.length; i++){
     const label = posLabels[i];
     const list = FX_RECOMMENDATIONS[label] || [];
     if(!list.length){ pools.push([]); continue; }
-    const chosen = pickWorstRank(list, rank);
+    const chosen = fxPickGen2Rec(slot, label, list, lockedPosition);
     const f = chosen ? byKey[chosen.key] : null;
     let pool = [];
     if(f){ try{ pool = f.fn(used)[i]||[]; }catch(e){} }
@@ -144,7 +175,7 @@ function fxBuildGen2PoolsForSlot(slot, posLabels, used, rule){
   const { recs, formulas, outN } = computeFormulaXPure(used, posLabels, rule.trendN, rule.controlN, rule.outN);
   const byKey = {};
   formulas.forEach(f => { byKey[f.key] = f; });
-  const rank = WORST_RANK_BY_SLOT[slot] || 1;
+  const lockedPosition = fxFindGen2LockedPosition(posLabels, recs);
   const prevOutN = FX_OUT_N;
   FX_OUT_N = outN; // sementara — dipulihkan lagi di finally, tidak mengganggu tampilan/slot lain
   try{
@@ -153,7 +184,7 @@ function fxBuildGen2PoolsForSlot(slot, posLabels, used, rule){
       const label = posLabels[i];
       const list = recs[label] || [];
       if(!list.length){ pools.push([]); continue; }
-      const chosen = pickWorstRank(list, rank);
+      const chosen = fxPickGen2Rec(slot, label, list, lockedPosition);
       const f = chosen ? byKey[chosen.key] : null;
       let pool = [];
       if(f){ try{ pool = f.fn(used)[i] || []; }catch(e){} }
@@ -302,15 +333,59 @@ function renderGen2LockUI(slot){
     : 'Belum ada slot Gen 2 yang dikunci.';
 }
 
-// ── Mode Auto: kunci Gen 1 otomatis dengan kandidat terbaik Formula X (peringkat akurasi
-// tertinggi per posisi, sudah dipotong sesuai Out N yang aktif — persis logika fxBuildGen1Pools).
-// Dipanggil SETIAP KALI analyze() selesai di Mode Auto, SEBELUM fxAutoUnlockAll/fxAutoGenerate
-// dijalankan — supaya Gen 2 & Auto Generate langsung memakai Gen 1 yang sudah terkunci segar,
-// bukan pool "live" yang belum tentu sama.
-function fxAutoLockGen1BestCandidates(){
-  if(!FX_RECOMMENDATIONS || !lastPosLabels || !lastPosLabels.length || !lastHistoryNumbers.length) return false;
-  const pools = fxBuildGen1Pools(lastPosLabels, lastHistoryNumbers, true); // forceTopRank=true — lihat catatan di fxBuildGen1Pools
+// ── Mode Auto: kunci Gen 1 otomatis sesuai FX_SELECTED yang tersimpan di Preset Aktif
+// (posisi/urutan radio per posisi A/C/K/E — BUKAN dipaksa rank #1 lagi). Dipanggil SETIAP KALI
+// analyze() selesai di Mode Auto, SEBELUM fxAutoUnlockAll/fxAutoGenerate dijalankan — supaya
+// Gen 2 & Auto Generate langsung memakai Gen 1 yang sudah terkunci segar, bukan pool "live"
+// yang belum tentu sama.
+//
+// ALUR (v4 — selalu buka-isi-kunci ulang, tidak lagi bercabang manual/auto):
+//   1) Kalau Gen 1 masih terkunci (apapun jenis kuncinya) → UNLOCK dulu.
+//   2) Pastikan data yang dibaca sudah SEGAR (bukan fingerprint lama sisa siklus sebelumnya) —
+//      kalau masih kebaca data lama, refresh + hitung ulang Formula X lagi (retry beberapa kali)
+//      sampai fingerprint berubah atau percobaan habis (data memang belum ganti periode).
+//   3) Isi pool sesuai Preset Aktif / FX_SELECTED (lewat fxBuildGen1Pools) — proses "simpan"-nya
+//      TIDAK perlu ditangani manual di sini, karena sudah otomatis mengikuti preset yang
+//      disalurkan ke FX_SELECTED.
+//   4) LOCK kembali Gen 1 dengan pool/fingerprint yang baru.
+//
+// PENTING soal urutan eksekusi: computeFormulaX() SELALU me-reset FX_SELECTED ke rank #1 untuk
+// posisi yang belum "disentuh". Yang biasanya menimpa FX_SELECTED balik ke preset adalah
+// presetApplyExtraNow(), tapi itu dipasang lewat hook MutationObserver #fxStatus yang jalan
+// ASYNC (microtask) — kalau fungsi ini dipanggil sinkron persis setelah computeFormulaX()
+// (seperti di pipeline Mode Auto), hook itu BELUM SEMPAT jalan. Makanya di sini
+// presetApplyExtraNow(presetPendingExtra) dipanggil LANGSUNG & SINKRON dulu sebelum
+// fxBuildGen1Pools — supaya FX_SELECTED sudah pasti sesuai preset saat pool Gen 1 dihitung,
+// bukan diam-diam kebaca rank #1 bawaan reset tadi.
+async function fxAutoLockGen1FromPreset(maxAttempts = 3, delayMs = 300){
+  // 1) Masih terkunci? Buka dulu — supaya isi Gen 1 selalu dihitung bersih dari preset terkini,
+  // bukan menimpa/bercampur dengan pool lama yang masih tersimpan.
+  if(fxGen1Locked){
+    fxGen1Locked = false;
+    fxGen1LockedPools = null;
+    fxGen1LockedPosLabels = null;
+  }
+  const staleFP = fxGen1LockedFP; // fingerprint kunci SEBELUMNYA — patokan "data lama"
+
+  // 2) Pastikan data yang lagi kebaca sudah segar (bukan fingerprint lama peninggalan siklus
+  // sebelumnya). Kalau masih sama persis dengan staleFP, refresh + hitung ulang Formula X lagi.
+  for(let attempt = 1; attempt <= maxAttempts; attempt++){
+    if(!FX_RECOMMENDATIONS || !lastPosLabels || !lastPosLabels.length || !lastHistoryNumbers.length) return false;
+    const fpNow = dataFingerprint(lastHistoryNumbers);
+    if(!staleFP || fpNow !== staleFP) break; // sudah segar (atau memang belum pernah dikunci)
+    if(attempt >= maxAttempts) break; // percobaan habis — data memang belum ganti, lanjut apa adanya
+    fxRefreshHistoryIfTerbaru();
+    if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
+    await fxSleep(delayMs);
+  }
+
+  // 3) Isi pool Gen 1 sesuai Preset Aktif / FX_SELECTED — tidak perlu proses simpan tambahan,
+  // sudah otomatis ikut preset yang disalurkan ke FX_SELECTED.
+  if(presetPendingExtra && typeof presetApplyExtraNow === 'function') presetApplyExtraNow(presetPendingExtra);
+  const pools = fxBuildGen1Pools(lastPosLabels, lastHistoryNumbers); // selalu ikut FX_SELECTED (preset)
   if(!pools) return false;
+
+  // 4) Kunci kembali Gen 1 dengan data segar.
   fxGen1Locked = true;
   fxGen1AutoLocked = true;
   fxGen1SemiAutoLocked = false;
@@ -327,7 +402,7 @@ function fxAutoUnlockAll(){
   if(!fp) return;
   // Gen 1 yang dikunci otomatis oleh Mode Auto (fxGen1AutoLocked) KEBAL di sini — bukan berarti
   // tidak pernah diperbarui, tapi karena pembaruannya sudah ditangani langsung oleh
-  // fxAutoLockGen1BestCandidates() tiap siklus analyze(), bukan lewat unlock-lalu-nganggur di sini.
+  // fxAutoLockGen1FromPreset() tiap siklus analyze(), bukan lewat unlock-lalu-nganggur di sini.
   if(fxGen1Locked && !fxGen1SemiAutoLocked && !fxGen1AutoLocked && fp !== fxGen1LockedFP){
     fxGen1Locked=false; fxGen1LockedPools=null; fxGen1LockedPosLabels=null; fxGen1LockedFP='';
     renderGen1LockUI();
@@ -650,19 +725,23 @@ async function runAutoPipelineAfterFormulaX(){
   if(fxPipelineInFlight) return 'skipped';
   fxPipelineInFlight = true;
   try{
-  // 0) Mode Auto (bukan Semi Auto): kunci Gen 1 otomatis dengan kandidat terbaik Formula X
-  // (sesuai Out N preset) SEBELUM langkah lain jalan. Semi Auto dilewati karena Gen 1-nya
-  // sudah dikunci manual dari Angka Bahan (fxGen1SemiAutoLocked) — tidak boleh ditimpa di sini.
+  // 0) Mode Auto (bukan Semi Auto): kunci Gen 1 otomatis SESUAI PRESET (FX_SELECTED — bukan
+  // rank #1 lagi) SEBELUM langkah lain jalan. Semi Auto dilewati karena Gen 1-nya sudah dikunci
+  // manual dari Angka Bahan (fxGen1SemiAutoLocked) — tidak boleh ditimpa di sini.
   //
   // PENTING: analyze() SELALU parse ulang Data Historis (Default) tanpa peduli radio Sumber
   // Data — jadi kalau radio lagi di "Data Terbaru", lastHistoryNumbers/FX_RECOMMENDATIONS di
   // titik ini masih hasil Default. Panggil fxRefreshHistoryIfTerbaru() + computeFormulaX() dulu
   // di sini supaya kalau radio memang "Data Terbaru", Gen 1 dikunci pakai data dari tabel
   // Histori All Periode yang SEGAR — bukan diam-diam balik ke Data Historis tiap siklus auto.
+  //
+  // Tidak ada lagi cabang manual/auto di sini — fxAutoLockGen1FromPreset() sendiri yang
+  // menangani semuanya: unlock dulu kalau masih terkunci, pastikan datanya segar (retry kalau
+  // masih kebaca fingerprint lama), isi dari preset/FX_SELECTED, lalu lock lagi.
   if(typeof getAppMode === 'function' && getAppMode() === 'auto'){
     fxRefreshHistoryIfTerbaru();
     if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
-    fxAutoLockGen1BestCandidates();
+    await fxAutoLockGen1FromPreset();
   }
 
   // Pastikan Gen 2 tersinkron ke Preset (retry sampai 3x) SEBELUM Auto Generate jalan.
