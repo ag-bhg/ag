@@ -502,22 +502,22 @@
 
   /* Segmented tray untuk Mode Normal/Semi Auto/Auto — tiap tombol pill terpisah (bukan satu tray gabungan) */
   .segTray{
-    display:flex; gap:8px; background:transparent; border:none;
-    border-radius:0; padding:0; margin-top:0;
+    display:flex; gap:4px; background:var(--panel); border:1px solid var(--line);
+    border-radius:999px; padding:6px; margin-top:0;
   }
   .segTray .modeBtn{
     flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
-    border:1px solid var(--line); background:var(--panel-2); color:var(--ink);
+    border:1px solid transparent; background:transparent; color:var(--ink-dim);
     padding:12px 8px; border-radius:999px; font-size:12.5px; font-weight:700;
     transition:background .15s ease, border-color .15s ease, color .15s ease;
   }
   .segTray .modeBtn i{font-size:16px;}
   .segTray .modeBtn .modeBtnIcon{font-size:15px; line-height:1;}
   .segTray .modeBtn.active{
-    background:linear-gradient(135deg, var(--amber), var(--amber-2)); color:#241705; border-color:var(--amber);
+    background:var(--teal); color:#06120f; border-color:var(--teal);
     font-weight:800;
   }
-  .segTray .modeBtn.active i{color:#241705;}
+  .segTray .modeBtn.active i{color:#06120f;}
   .segTray .modeBtn:disabled{ opacity:.45; cursor:not-allowed; filter:grayscale(.3); }
 
   /* Badge LIVE / status cloud — background otomatis ikut warna teks (currentColor) */
@@ -622,45 +622,60 @@
     box-shadow:inset 0 0 0 1px rgba(230,172,92,.08);
   }
 
-  /* ===================== Tema kartu neon biru (Result Terakhir + showcase Histori All Periode) ===================== */
+  /* ===================== Tema kartu "Result Live" (Result Terakhir + showcase Histori All Periode) ===================== */
   :root{
-    --neon-blue-1:#151c8f; --neon-blue-2:#2f5dff; --neon-blue-3:#060912;
-    --neon-border:#3f6bff; --neon-glow:rgba(63,107,255,.55);
-    --neon-maroon-1:#4a1220; --neon-maroon-2:#0a0509;
+    --live-card-bg:#1c1015; --live-card-border:rgba(230,172,92,.4);
+    --live-highlight-bg:#241705;
   }
+
+  /* Kartu Result Terakhir (beranda) — samakan dengan tema liveCard */
   .neonCard{
-    background:#000; border:2px solid var(--neon-border); border-radius:20px;
-    padding:0; overflow:hidden;
-    box-shadow:0 0 0 1px rgba(63,107,255,.25), 0 0 26px var(--neon-glow);
+    background:var(--live-card-bg); border:1px solid var(--live-card-border);
+    border-radius:20px; padding:16px;
   }
-  .neonBand{ padding:10px 14px; text-align:center; }
   .neonBand--head{
-    background:linear-gradient(180deg, var(--neon-blue-1), var(--neon-blue-2));
-    color:#fff; font-family:var(--sans); font-weight:700; font-size:13px;
     display:flex; align-items:center; justify-content:space-between; gap:8px;
+    font-size:14.5px; font-weight:700; color:var(--ink); margin-bottom:14px;
   }
-  .neonBand--body{
-    background:linear-gradient(180deg, var(--neon-blue-2) 0%, var(--neon-blue-3) 100%);
-    padding:20px 12px;
+  .neonBand--head span:last-child{
+    display:inline-flex; align-items:center; gap:6px;
+    background:rgba(79,184,163,.14); color:var(--teal);
+    font-size:11px; font-weight:700; padding:5px 10px; border-radius:20px;
+    white-space:nowrap;
   }
   .neonBand--body .digitRow{ margin-top:0; }
-  .neonBand--foot{ background:linear-gradient(180deg, var(--neon-maroon-1), var(--neon-maroon-2)); }
-  .neonNumber{ font-family:var(--mono); font-weight:800; font-size:30px; color:#fff; letter-spacing:.02em; }
-  .neonTimer{ font-family:var(--mono); font-weight:700; font-size:13px; color:#fff; }
-
-  #resultHeroCard .digitBox{
-    background:transparent; border:none; box-shadow:none; aspect-ratio:auto;
-    color:#fff; font-size:34px;
+  .neonBand--foot{ margin-top:12px; }
+  .liveCard{
+    background:var(--live-card-bg); border:1px solid var(--live-card-border); border-radius:14px;
+    padding:14px;
   }
-  #resultHeroCard .hint{ color:rgba(255,255,255,.85); font-size:12px; }
+  .liveCardHead{
+    display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px;
+  }
+  .liveCardHead .liveCardLabel{ font-size:15px; font-weight:700; color:var(--ink); }
+  .liveCard .digitRow{ margin-top:0; }
+  .liveCard .hint{ margin-top:10px; }
+  .digitBox.highlight{
+    background:var(--live-highlight-bg); border:1px solid var(--amber); color:var(--amber-2);
+    transform:scale(1.06); font-weight:900;
+  }
 
-  .neonGrid{
+  .liveGrid{
     display:grid; grid-template-columns:repeat(2, 1fr); gap:10px;
     transition:transform .32s ease, opacity .32s ease;
   }
-  .neonGrid .neonCard{ margin-bottom:0; }
-  .neonGrid.neonSlideOut{ transform:translateX(-24px); opacity:0; }
-  .neonGrid.neonSlideIn{ transform:translateX(24px); opacity:0; }
+  .liveGrid.liveSlideOut{ transform:translateX(-24px); opacity:0; }
+  .liveGrid.liveSlideIn{ transform:translateX(24px); opacity:0; }
+  .liveMiniCard{
+    background:var(--live-card-bg); border:1px solid var(--live-card-border); border-radius:14px;
+    padding:12px; text-align:center;
+  }
+  .liveMiniCard .liveMiniName{ font-size:12.5px; font-weight:700; color:var(--ink); margin-bottom:10px; }
+  .liveMiniCard .liveMiniNumber{ font-family:var(--mono); font-size:26px; font-weight:800; color:var(--amber); }
+  .liveMiniCard .liveMiniTimer{
+    display:block; margin-top:10px; padding-top:8px; border-top:1px solid var(--live-card-border);
+    font-family:var(--mono); font-size:12px; font-weight:700; color:var(--teal);
+  }
 
   .livepill{
     display:inline-flex; align-items:center; gap:6px; background:rgba(79,184,163,.16);
