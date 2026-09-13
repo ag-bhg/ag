@@ -622,6 +622,46 @@
     box-shadow:inset 0 0 0 1px rgba(230,172,92,.08);
   }
 
+  /* ===================== Tema kartu neon biru (Result Terakhir + showcase Histori All Periode) ===================== */
+  :root{
+    --neon-blue-1:#151c8f; --neon-blue-2:#2f5dff; --neon-blue-3:#060912;
+    --neon-border:#3f6bff; --neon-glow:rgba(63,107,255,.55);
+    --neon-maroon-1:#4a1220; --neon-maroon-2:#0a0509;
+  }
+  .neonCard{
+    background:#000; border:2px solid var(--neon-border); border-radius:20px;
+    padding:0; overflow:hidden;
+    box-shadow:0 0 0 1px rgba(63,107,255,.25), 0 0 26px var(--neon-glow);
+  }
+  .neonBand{ padding:10px 14px; text-align:center; }
+  .neonBand--head{
+    background:linear-gradient(180deg, var(--neon-blue-1), var(--neon-blue-2));
+    color:#fff; font-family:var(--sans); font-weight:700; font-size:13px;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+  }
+  .neonBand--body{
+    background:linear-gradient(180deg, var(--neon-blue-2) 0%, var(--neon-blue-3) 100%);
+    padding:20px 12px;
+  }
+  .neonBand--body .digitRow{ margin-top:0; }
+  .neonBand--foot{ background:linear-gradient(180deg, var(--neon-maroon-1), var(--neon-maroon-2)); }
+  .neonNumber{ font-family:var(--mono); font-weight:800; font-size:30px; color:#fff; letter-spacing:.02em; }
+  .neonTimer{ font-family:var(--mono); font-weight:700; font-size:13px; color:#fff; }
+
+  #resultHeroCard .digitBox{
+    background:transparent; border:none; box-shadow:none; aspect-ratio:auto;
+    color:#fff; font-size:34px;
+  }
+  #resultHeroCard .hint{ color:rgba(255,255,255,.85); font-size:12px; }
+
+  .neonGrid{
+    display:grid; grid-template-columns:repeat(2, 1fr); gap:10px;
+    transition:transform .32s ease, opacity .32s ease;
+  }
+  .neonGrid .neonCard{ margin-bottom:0; }
+  .neonGrid.neonSlideOut{ transform:translateX(-24px); opacity:0; }
+  .neonGrid.neonSlideIn{ transform:translateX(24px); opacity:0; }
+
   .livepill{
     display:inline-flex; align-items:center; gap:6px; background:rgba(79,184,163,.16);
     color:var(--teal); font-size:11px; font-weight:800; padding:5px 12px; border-radius:20px;
