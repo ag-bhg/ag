@@ -629,22 +629,23 @@
   }
 
   /* Kartu Result Terakhir (beranda) — samakan dengan tema liveCard */
-  .neonCard{
+  /* Dibatasi khusus #resultHeroCard supaya tidak ikut mengubah kartu lain (mis. grid Result Live) yang kebetulan pakai class sama */
+  #resultHeroCard.neonCard{
     background:var(--live-card-bg); border:1px solid var(--live-card-border);
     border-radius:20px; padding:16px;
   }
-  .neonBand--head{
+  #resultHeroCard .neonBand--head{
     display:flex; align-items:center; justify-content:space-between; gap:8px;
     font-size:14.5px; font-weight:700; color:var(--ink); margin-bottom:14px;
   }
-  .neonBand--head span:last-child{
+  #resultHeroCard .neonBand--head span:last-child{
     display:inline-flex; align-items:center; gap:6px;
     background:rgba(79,184,163,.14); color:var(--teal);
     font-size:11px; font-weight:700; padding:5px 10px; border-radius:20px;
     white-space:nowrap;
   }
-  .neonBand--body .digitRow{ margin-top:0; }
-  .neonBand--foot{ margin-top:12px; }
+  #resultHeroCard .neonBand--body .digitRow{ margin-top:0; }
+  #resultHeroCard .neonBand--foot{ margin-top:12px; }
   .liveCard{
     background:var(--live-card-bg); border:1px solid var(--live-card-border); border-radius:14px;
     padding:14px;
