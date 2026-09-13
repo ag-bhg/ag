@@ -78,7 +78,7 @@ allpBadgeSet('Menghubungkan…');
 allpInitFirebaseListener();
 
 // ===================== SHOWCASE "RESULT LIVE" =====================
-// Kartu neon biru (gaya sama seperti Result Terakhir) yang menampilkan result
+// Kartu amber/maroon (gaya sama seperti Result Terakhir) yang menampilkan result
 // terbaru dari beberapa pasaran sekaligus, diambil dari allPeriodeHistoryList
 // (sumber data yang sama dengan tabel Histori All Periode di bawahnya).
 // Ditampilkan 4 kartu (2x2) sekaligus, gantian tiap 30 detik dengan animasi
@@ -117,15 +117,15 @@ function allpBuildShowcaseCardHtml(code){
   const row = allpFindLatestForCode(code);
   const angka = row ? row.nomor : '----';
   return `
-    <div class="neonCard">
-      <div class="neonBand neonBand--head"><span>${nama}</span></div>
-      <div class="neonBand neonBand--body"><span class="neonNumber">${angka}</span></div>
-      <div class="neonBand neonBand--foot"><span class="neonTimer" data-code="${code.replace(/"/g,'&quot;')}">-- : -- : --</span></div>
+    <div class="liveMiniCard">
+      <div class="liveMiniName">${nama}</div>
+      <div class="liveMiniNumber">${angka}</div>
+      <span class="liveMiniTimer" data-code="${code.replace(/"/g,'&quot;')}">-- : -- : --</span>
     </div>`;
 }
 
 function allpTickShowcaseTimers(){
-  document.querySelectorAll('#allPeriodeShowcaseGrid .neonTimer').forEach(el => {
+  document.querySelectorAll('#allPeriodeShowcaseGrid .liveMiniTimer').forEach(el => {
     const code = el.getAttribute('data-code');
     const next = (typeof firebaseNextDraw === 'function') ? firebaseNextDraw(code) : null;
     el.textContent = next ? allpFormatCountdownHMS(next.ts - Date.now()) : '-- : -- : --';
@@ -142,13 +142,13 @@ function allpRenderShowcasePage(animate){
     grid.innerHTML = codes.map(allpBuildShowcaseCardHtml).join('');
     allpTickShowcaseTimers();
     if(animate){
-      grid.classList.add('neonSlideIn');
-      requestAnimationFrame(() => requestAnimationFrame(() => grid.classList.remove('neonSlideIn')));
+      grid.classList.add('liveSlideIn');
+      requestAnimationFrame(() => requestAnimationFrame(() => grid.classList.remove('liveSlideIn')));
     }
   };
   if(animate){
-    grid.classList.add('neonSlideOut');
-    setTimeout(() => { grid.classList.remove('neonSlideOut'); paint(); }, 320);
+    grid.classList.add('liveSlideOut');
+    setTimeout(() => { grid.classList.remove('liveSlideOut'); paint(); }, 320);
   } else {
     paint();
   }
