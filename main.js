@@ -204,7 +204,7 @@ const PRESET_FIELDS = [
 ];
 
 const PRESET_STORAGE_KEY = 'appPresets_v1';
-const PRESET_MAX_COUNT = 2; // sesuai permintaan: cukup simpan 1-2 preset saja
+const PRESET_MAX_COUNT = 12; // sesuai permintaan: simpan sampai 12 preset
 let presetFirebaseReady = false;
 
 function presetLoadAll(){
