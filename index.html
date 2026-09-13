@@ -35,22 +35,18 @@
     <span id="firebaseDataBadge" class="badge livepill">Menghubungkan…</span>
   </div>
 
-  <div class="card neonCard" id="resultHeroCard">
-    <div class="neonBand neonBand--head">
-      <span>Result Terakhir</span>
-      <span id="firebaseCountdown" style="font-weight:400; font-size:11px;">⏳ Menuju result: —</span>
+  <div class="card liveCard" id="resultHeroCard">
+    <div class="liveCardHead">
+      <span class="liveCardLabel">Result Terakhir</span>
+      <span id="firebaseCountdown" class="livepill">⏳ Menuju result: —</span>
     </div>
-    <div class="neonBand neonBand--body">
-      <div class="digitRow">
-        <div class="digitBox" id="homeResultDigit0">–</div>
-        <div class="digitBox" id="homeResultDigit1">–</div>
-        <div class="digitBox" id="homeResultDigit2">–</div>
-        <div class="digitBox" id="homeResultDigit3">–</div>
-      </div>
+    <div class="digitRow">
+      <div class="digitBox" id="homeResultDigit0">–</div>
+      <div class="digitBox" id="homeResultDigit1">–</div>
+      <div class="digitBox" id="homeResultDigit2">–</div>
+      <div class="digitBox highlight" id="homeResultDigit3">–</div>
     </div>
-    <div class="neonBand neonBand--foot">
-      <p class="hint" id="firebaseScheduleStatus" style="margin:0;">Memuat jadwal pasaran…</p>
-    </div>
+    <p class="hint" id="firebaseScheduleStatus">Memuat jadwal pasaran…</p>
   </div>
 
   <div class="card accordion" id="dataAccordion">
@@ -87,7 +83,7 @@
 
   <div class="card" id="allPeriodeShowcaseCard">
     <h2 style="margin:0 0 12px;">🎰 Result Live</h2>
-    <div class="neonGrid" id="allPeriodeShowcaseGrid"></div>
+    <div class="liveGrid" id="allPeriodeShowcaseGrid"></div>
   </div>
 
   <div class="card accordion" id="allPeriodeHistoryAccordion">
