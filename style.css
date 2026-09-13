@@ -502,22 +502,22 @@
 
   /* Segmented tray untuk Mode Normal/Semi Auto/Auto — tiap tombol pill terpisah (bukan satu tray gabungan) */
   .segTray{
-    display:flex; gap:4px; background:var(--panel); border:1px solid var(--line);
-    border-radius:999px; padding:6px; margin-top:0;
+    display:flex; gap:8px; background:transparent; border:none;
+    border-radius:0; padding:0; margin-top:0;
   }
   .segTray .modeBtn{
     flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
-    border:1px solid transparent; background:transparent; color:var(--ink-dim);
+    border:1px solid var(--line); background:var(--panel-2); color:var(--ink);
     padding:12px 8px; border-radius:999px; font-size:12.5px; font-weight:700;
     transition:background .15s ease, border-color .15s ease, color .15s ease;
   }
   .segTray .modeBtn i{font-size:16px;}
   .segTray .modeBtn .modeBtnIcon{font-size:15px; line-height:1;}
   .segTray .modeBtn.active{
-    background:var(--teal); color:#06120f; border-color:var(--teal);
+    background:linear-gradient(135deg, var(--amber), var(--amber-2)); color:#241705; border-color:var(--amber);
     font-weight:800;
   }
-  .segTray .modeBtn.active i{color:#06120f;}
+  .segTray .modeBtn.active i{color:#241705;}
   .segTray .modeBtn:disabled{ opacity:.45; cursor:not-allowed; filter:grayscale(.3); }
 
   /* Badge LIVE / status cloud — background otomatis ikut warna teks (currentColor) */
@@ -627,24 +627,6 @@
     --live-card-bg:#1c1015; --live-card-border:rgba(230,172,92,.4);
     --live-highlight-bg:#241705;
   }
-
-  /* Tema kartu Result Terakhir di beranda, dibatasi ID (tidak menyentuh elemen lain yang kebetulan pakai class sama) */
-  #resultHeroCard.neonCard{
-    background:var(--live-card-bg); border:1px solid var(--live-card-border);
-    border-radius:20px; padding:16px;
-  }
-  #resultHeroCard .neonBand--head{
-    display:flex; align-items:center; justify-content:space-between; gap:8px;
-    font-size:14.5px; font-weight:700; color:var(--ink); margin-bottom:14px;
-  }
-  #resultHeroCard .neonBand--head span:last-child{
-    display:inline-flex; align-items:center; gap:6px;
-    background:rgba(79,184,163,.14); color:var(--teal);
-    font-size:11px; font-weight:700; padding:5px 10px; border-radius:20px;
-    white-space:nowrap;
-  }
-  #resultHeroCard .neonBand--body .digitRow{ margin-top:0; }
-  #resultHeroCard .neonBand--foot{ margin-top:12px; }
   .liveCard{
     background:var(--live-card-bg); border:1px solid var(--live-card-border); border-radius:14px;
     padding:14px;
