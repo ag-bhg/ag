@@ -364,15 +364,16 @@ function presetApplyExtraNow(extra){
   // Sisanya butuh Data Historis sudah diproses (posisi & Formula X sudah ada).
   if(!lastPosLabels || !lastPosLabels.length) return;
 
-  // Formula X per posisi: timpa lagi rangking #1 bawaan computeFormulaX() dengan pilihan preset —
-  // hanya kalau key formula itu masih valid untuk data saat ini.
+  // Formula X per posisi: timpa lagi rangking #1 bawaan computeFormulaX() dengan POSISI/URUTAN
+  // yang disimpan di preset (bukan nama formula lagi) — supaya preset ikut "radio ke berapa",
+  // konsisten walau nama/urutan formula di daftar rekomendasi berubah antar pasaran.
   if(extra.fxSelected && FX_RECOMMENDATIONS){
     let changed = false;
     lastPosLabels.forEach(label => {
-      const key = extra.fxSelected[label];
+      const idx = extra.fxSelected[label];
       const recs = FX_RECOMMENDATIONS[label] || [];
-      if(key && recs.some(r => r.key === key)){
-        FX_SELECTED[label] = key;
+      if(typeof idx === 'number' && recs[idx]){
+        FX_SELECTED[label] = idx;
         FX_TOUCHED[label] = true;
         changed = true;
       }
