@@ -34,13 +34,28 @@ function parseHistoryDataFull(raw){
 
 // ---------- Formula X: state ----------
 let FX_RECOMMENDATIONS = null; // { posLabel: [{key,label,source,pct,hit,total}, ...] } terurut dari akurasi tertinggi
-let FX_SELECTED = {};          // posLabel -> key varian yang dipilih (radio)
+let FX_SELECTED = {};          // posLabel -> INDEX urutan radio yang dipilih (0 = persentase tertinggi),
+                                // BUKAN key/nama formula lagi — supaya preset ikut "posisi ke berapa" di
+                                // daftar rekomendasi, bukan ikut nama varian (lihat fxSelectedKey di bawah
+                                // & presetApplyExtraNow di main.js).
 let FX_TOUCHED = {};           // posLabel -> true kalau radio pernah digeser MANUAL oleh user (dipakai Gen 2 untuk tahu beda
                                 // antara "masih default" vs "sudah dipilih sendiri") — direset tiap computeFormulaX()/ganti data.
 let TOP_POSISI_SELECTED = {};  // posLabel -> 'kuat' | 'sedang' (radio Top Posisi)
 let FX_FORMULAS_CACHE = null;  // { formulas, controlN } — daftar formula terakhir dipakai computeFormulaX(), dipakai ulang oleh fxApplyToGenerator()
 let FX_OUT_N = 8;              // OUT= jumlah digit kandidat per pool (dulu tetap 8, sekarang bisa 4-9 lewat dropdown #fxOutN)
 let FX_HISTORY_DATA = [];      // array [{nomor, periode, tanggal}, ...] — data lengkap dengan periode untuk tabel backtest
+
+// Ambil KEY formula aktual dari INDEX yang tersimpan di FX_SELECTED untuk suatu posisi. Fallback
+// ke index 0 (persentase tertinggi) kalau index-nya sudah tidak valid lagi untuk data saat ini
+// (mis. daftar rekomendasi pasaran baru lebih pendek). Dipakai di semua tempat yang butuh nama
+// formula asli (formulaByKey, dsb) — FX_SELECTED sendiri cuma menyimpan urutan/posisi.
+function fxSelectedKey(label){
+  const recs = FX_RECOMMENDATIONS && FX_RECOMMENDATIONS[label];
+  if(!recs || !recs.length) return null;
+  const idx = FX_SELECTED[label];
+  const rec = (typeof idx === 'number' && recs[idx]) ? recs[idx] : recs[0];
+  return rec ? rec.key : null;
+}
 
 function applyDigitMap(numStr, map){
   if(!map) return numStr;
@@ -447,10 +462,11 @@ function computeFormulaX(used, posLabels){
   });
   FX_RECOMMENDATIONS = recs;
 
-  // Selalu arahkan pilihan (radio) ke varian dengan akurasi tertinggi tiap kali dihitung ulang / dioptimalkan
-  // (Hitung Ulang, Pilih N Wilson, Pilih N Walk-Forward, Pilih N Ensemble) — tidak mempertahankan pilihan lama.
+  // Selalu arahkan pilihan (radio) ke urutan/index dengan akurasi tertinggi (index 0) tiap kali
+  // dihitung ulang / dioptimalkan (Hitung Ulang, Pilih N Wilson, Pilih N Walk-Forward, Pilih N
+  // Ensemble) — tidak mempertahankan pilihan lama.
   posLabels.forEach(label => {
-    FX_SELECTED[label] = recs[label][0] ? recs[label][0].key : null;
+    FX_SELECTED[label] = recs[label].length ? 0 : null;
     FX_TOUCHED[label] = false; // reset penanda "sudah dipilih manual" tiap hitung ulang
   });
 
@@ -495,9 +511,9 @@ function renderFormulaX(posLabels){
       radio.type = 'radio';
       radio.name = 'fxpos_' + label;
       radio.value = opt.key;
-      radio.checked = (opt.key === FX_SELECTED[label]);
+      radio.checked = (i === FX_SELECTED[label]);
       radio.addEventListener('change', () => {
-        FX_SELECTED[label] = opt.key;
+        FX_SELECTED[label] = i; // simpan INDEX urutan (posisi radio), bukan key/nama formula
         FX_TOUCHED[label] = true; // tandai posisi ini sudah dipilih manual -> Gen 2 ikut radio mulai sekarang
         renderFxTrendNumbers(posLabels, lastHistoryNumbers);
         renderFxBacktestTable(posLabels, lastHistoryNumbers);
@@ -550,7 +566,7 @@ function renderFxTrendNumbers(posLabels, used){
     list.className = 'fxTrendList';
 
     const recs = FX_RECOMMENDATIONS[label] || [];
-    const selectedKey = FX_SELECTED[label];
+    const selectedKey = fxSelectedKey(label);
     let shown = recs.slice(0, 3);
     if(selectedKey && !shown.some(o => o.key === selectedKey)){
       const selOpt = recs.find(o => o.key === selectedKey);
@@ -673,7 +689,7 @@ function renderFxBacktestTable(posLabels, used){
 
   const formulaByKey = {};
   FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
-  const selFn = posLabels.map(label => formulaByKey[FX_SELECTED[label]]);
+  const selFn = posLabels.map(label => formulaByKey[fxSelectedKey(label)]);
 
   if(selFn.some(f => !f)){
     kpiBox.innerHTML = '<p class="emptynote">Pilih varian Formula X dulu untuk tiap posisi.</p>';
@@ -787,7 +803,7 @@ function fxApplyToGenerator(silent){
   let pools;
   try{
     pools = lastPosLabels.map((label, idx) => {
-      const f = formulaByKey[FX_SELECTED[label]];
+      const f = formulaByKey[fxSelectedKey(label)];
       if(!f) return [];
       const allPools = f.fn(lastHistoryNumbers); // lastHistoryNumbers sudah newest-first
       return allPools[idx] || [];
@@ -835,13 +851,28 @@ function applyTopPosisiToGenerator(){
 document.getElementById('topPosApplyBtn').addEventListener('click', applyTopPosisiToGenerator);
 document.getElementById('fxRecalcBtn').addEventListener('click', () => {
   fxRefreshHistoryIfTerbaru();
-  // Top Posisi (Kuat/Sedang) pakai state terpisah dari FX_SELECTED (lihat TOP_POSISI_SELECTED
-  // di atas) — computeFormulaX() TIDAK menyentuhnya, jadi kalau tidak dikosongkan di sini,
-  // pilihan "Sedang" yang sempat dipilih manual akan nyangkut terus walau sudah Hitung Ulang.
-  // Reset ini HANYA untuk tombol manual di menu Normal — Mode Auto tidak lewat sini sama sekali
-  // (lihat computeFormulaX() dipanggil langsung di automode.js), jadi tidak kena dampak.
-  TOP_POSISI_SELECTED = {};
-  if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
+  const _mode = (typeof getAppMode === 'function') ? getAppMode() : 'normal';
+  if(_mode === 'auto' || _mode === 'semi'){
+    // Mode Auto/Semi: Preset yang pegang kendali PENUH atas semua pengaturan (Top Posisi,
+    // pilihan Formula X per posisi, dst — lihat presetApplyExtraNow yang dipasang ulang lewat
+    // hook MutationObserver #fxStatus di automode.js). Tombol ini di sini HANYA bertugas
+    // merefresh sumber data (tabel Histori terbaru via fxRefreshHistoryIfTerbaru di atas) supaya
+    // semua sistem yang butuh data segar (Formula X, Generator, Filter) ikut kebaca — BUKAN
+    // mereset pengaturan. Makanya TIDAK ada TOP_POSISI_SELECTED={} di cabang ini: itu urusan
+    // preset, bukan tombol ini.
+    if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
+    // computeFormulaX() di atas sudah otomatis mengarahkan tiap radio Formula X (fxpos_) ke
+    // varian dengan PERSENTASE TERTINGGI dulu sebagai default; preset (lewat hook di atas) baru
+    // menimpanya lagi SETELAH ini kalau memang punya pilihan tersimpan yang masih valid untuk
+    // posisi itu — itu yang dimaksud "kendali penuh oleh preset", bukan menghalangi default ini.
+    if(typeof runAutoPipelineAfterFormulaX === 'function') runAutoPipelineAfterFormulaX();
+  } else {
+    // Mode Normal: tidak ada preset yang mengendalikan, jadi Top Posisi (Kuat/Sedang) perlu
+    // dikosongkan manual di sini supaya balik ke default "Kuat" — computeFormulaX() tidak
+    // pernah menyentuh TOP_POSISI_SELECTED sama sekali.
+    TOP_POSISI_SELECTED = {};
+    if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
+  }
 });
 
 
