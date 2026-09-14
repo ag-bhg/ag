@@ -1,1110 +1,704 @@
-// ===================== AUTOMODE =====================
-// Auto Generator Formula X (Gen1/Gen2 A/B/C) + Mode Normal/Semi Auto/Auto (pipeline penuh).
+// ===================== MAIN =====================
+// Pengaturan (kumpul/pulihkan semua opsi), Preset Pengaturan, UI umum (tab, fade-in,
+// badge sync), dan tombol Kembali ke Atas.
 
-// ============================================================
-// AUTO GENERATOR FORMULA X — v3
-// Gen 1 : pool sesuai FX_SELECTED (radio Formula X per posisi / Preset Aktif), bisa dikunci —
-//         default % tertinggi hanya kalau posisi itu belum pernah dipilih/disimpan di preset
-// Gen 2A/2B/2C : 3 slot filter eliminasi berlapis, masing-masing bisa dikunci
-// Auto-unlock semua saat pasaran berganti
-// ============================================================
-setupSectionToggle('fxAutoGenToggle', 'fxAutoGenWrap', 'fxAutoGenToggleIcon');
-
-// ── State Gen 1 ──
-let fxGen1Locked = false;
-let fxGen1LockedPools = null;
-let fxGen1LockedPosLabels = null;
-let fxGen1LockedFP = '';
-// true kalau Gen 1 dikunci OTOMATIS oleh pipeline Mode Auto (bukan klik manual/Semi Auto) —
-// selama flag ini true, Gen 1 KEBAL terhadap fxAutoUnlockAll (tidak ikut dibuka walau
-// fingerprint data berubah karena periode baru). Tetap SELALU dihitung ulang & dikunci lagi
-// tiap kali analyze() selesai di Mode Auto (lihat fxAutoLockGen1FromPreset) — sesuai FX_SELECTED
-// yang tersimpan di Preset Aktif (bukan lagi dipaksa rank #1) — jadi angkanya tetap segar
-// mengikuti preset tanpa pernah "lepas kunci".
-let fxGen1AutoLocked = false;
-
-// ── State Gen 2 (A/B/C) ──
-const FX_GEN2_SLOTS = ['A','B','C'];
-const fxGen2State = {
-  A: { locked:false, pools:null, posLabels:null, fp:'', rule:null },
-  B: { locked:false, pools:null, posLabels:null, fp:'', rule:null },
-  C: { locked:false, pools:null, posLabels:null, fp:'', rule:null },
+// ===================== NILAI DEFAULT RESMI SISTEM =====================
+// Satu-satunya sumber kebenaran untuk "pengaturan default" seluruh sistem.
+// resetAllSettings() di bawah SELALU ambil dari sini (lewat presetApplyFields) —
+// supaya kalau nanti default berubah, cukup ubah di SATU tempat ini saja.
+const SETTINGS_DEFAULTS = {
+  // Formula X
+  fxTrendN: '30',
+  fxControlN: '10',
+  fxOutN: '8',
+  fxAutoFilterWorst: false,
+  fxDataSource: 'default',
+  // Jumlah & Selisih
+  jsRowsShown: '30',
+  jsRecoCountJumlah: '6',
+  jsRecoCountSelisih: '6',
+  jsJumlahManual: '',
+  jsSelisihManual: '',
+  // Ai Ai (Angka Ikut)
+  aiDataSource: 'default',
+  aiRowsShown: '30',
+  aiDigitCount: '6',
+  aiWinACManual: '',
+  aiWinCKManual: '',
+  aiWinKEManual: '',
+  // Colok Bebas (referensi Ai Bulanan)
+  cbMonthHistorySelect: '',
+  // Shio
+  shioPickCount: '6',
+  shioRowsShown: '30',
+  shioManual: ''
 };
 
-// Fingerprint data historis untuk deteksi ganti pasaran
-function dataFingerprint(used){
-  if(!used || !used.length) return '';
-  return used.length+'|'+used[0]+'|'+used[used.length-1];
+function resetAllSettings(){
+  // Top Posisi: kosongkan pilihan internal supaya balik ke default (Kuat) saat dihitung ulang
+  // — ini state di memori, bukan kontrol HTML, jadi tidak bisa ikut lewat presetApplyFields().
+  // FX_SELECTED SENGAJA TIDAK direset manual di sini lagi: computeFormulaX() (dipanggil analyze()
+  // tepat setelah resetAllSettings() di semua pemanggilnya) SELALU meng-overwrite FX_SELECTED ke
+  // rangking akurasi tertinggi tiap posisi (lihat formula.js). Reset ganda di sini cuma tumpang
+  // tindih dengan itu — dan berisiko konflik kalau nanti Preset ikut mengisi FX_SELECTED.
+  FX_TOUCHED = {};
+  TOP_POSISI_SELECTED = {};
+
+  // Mode Normal WAJIB lepas dari kendali Preset — kalau tidak, aturan per-posisi preset yang
+  // masih "aktif" akan dipasang lagi otomatis lewat hook di automode.js tiap Formula X dihitung.
+  presetPendingExtra = null;
+
+  // Generator: lepas kunci Gen 1/Gen 2 & sumber kustom Auto Generator (state internal juga).
+  if(typeof unlockGen1Gen2 === 'function') unlockGen1Gen2();
+  filterCustomSource = null;
+
+  // Semua kontrol Formula X / Ai Ai / Jumlah & Selisih / Shio / Colok Bebas -> balik ke SETTINGS_DEFAULTS.
+  presetApplyFields(SETTINGS_DEFAULTS);
+
+  // Filter Pangkas Kombinasi sudah punya reset sendiri yang lengkap (checkbox, manual,
+  // Twin Murni, Shio pick) dan nilainya sudah persis default yang disepakati -> pakai itu,
+  // tidak perlu ditulis ulang di sini.
+  if(typeof resetFilters === 'function') resetFilters();
 }
 
-// Build pool dari Formula X — selalu ikut FX_SELECTED (posisi/urutan radio Formula X per
-// posisi yang tersimpan di Preset Aktif / dipilih manual di panel Formula X), sama untuk
-// Mode Auto (lihat fxAutoLockGen1FromPreset) maupun tombol Lock Gen 1 manual.
-function fxBuildGen1Pools(posLabels, used){
-  if(!FX_FORMULAS_CACHE || !FX_RECOMMENDATIONS) return null;
-  const byKey = {};
-  FX_FORMULAS_CACHE.formulas.forEach(f => { byKey[f.key]=f; });
-  const pools = [];
-  for(let i=0; i<posLabels.length; i++){
-    const recs = FX_RECOMMENDATIONS[posLabels[i]] || [];
-    if(!recs.length) return null;
-    // Pakai POSISI/URUTAN yang sedang DIPILIH manual di panel Formula X (FX_SELECTED, kini
-    // menyimpan INDEX urutan radio — bukan nama key) untuk posisi ini — supaya Gen 1 ikut
-    // berubah begitu radio diganti, dan preset ikut "posisi ke berapa yang disimpan", bukan
-    // "nama formula". Fallback ke rangking #1 (persentase tertinggi / index 0) kalau posisi
-    // ini belum pernah dipilih user sama sekali atau index-nya sudah tidak valid lagi.
-    const selIdx = FX_SELECTED[posLabels[i]];
-    const chosenRec = (typeof selIdx === 'number' && recs[selIdx]) ? recs[selIdx] : recs[0];
-    const f = byKey[chosenRec.key];
-    let pool = [];
-    if(f){ try{ pool = f.fn(used)[i]||[]; }catch(e){} }
-    pools.push(pool.length ? pool : ['0']);
-  }
-  return pools;
-}
+// ---------- Kumpulkan & pulihkan SEMUA opsi/pengaturan di seluruh menu (Formula X, Kontrol Ai, Generator, Filter) ----------
+// Dipakai oleh tombol Simpan/Muat supaya setiap data tersimpan membawa persis pilihan & input manual/otomatis
+// yang sedang aktif di semua menu, bukan cuma teks Data Historis-nya saja.
 
-// ── PATEN GEN 2 (baru): tiap slot punya PERINGKAT TERBURUK tetap, tidak lagi ikut
-// posisi Formula X yang dipilih manual (selected/touched). 2A = terburuk ke-1 (paling
-// buncit), 2B = terburuk ke-2, 2C = terburuk ke-3 — membentuk 3 lapis eliminasi yang
-// otomatis berbeda tanpa perlu geser radio manual.
-//
-// PENGECUALIAN (v2): kalau satu posisi punya persentase TERBURUK yang PALING KECIL
-// dibanding gabungan seluruh posisi lain (bukan cuma dibanding sesama posisinya sendiri),
-// posisi itu "dikunci" — dipaksa pakai formula terburuk ke-1 miliknya sendiri di KETIGA
-// slot (2A/2B/2C), tidak ikut naik ke rank ke-2/ke-3 seperti posisi lain. Lihat
-// fxFindGen2LockedPosition(). Kalau ada dasi (persentase sama persis di >1 posisi),
-// posisi yang urutannya lebih dulu di posLabels (mis. C sebelum K) yang menang.
-const WORST_RANK_BY_SLOT = { A: 1, B: 2, C: 3 };
+// ===== Tambahan rapikan tampilan (tidak mengubah logika perhitungan yang sudah ada) =====
 
-// Ambil formula dari daftar rekomendasi (sudah diurutkan dari akurasi TERTINGGI ke
-// TERENDAH) sesuai peringkat TERBURUK ke-N. rank=1 → paling akhir/buncit, rank=2 →
-// kedua dari akhir, dst. Kalau daftar lebih pendek dari rank, fallback ke yang paling awal.
-function pickWorstRank(list, rank){
-  if(!list || !list.length) return null;
-  const idx = list.length - rank;
-  return list[idx >= 0 ? idx : 0];
-}
-
-// Cari SATU posisi yang wajib dikunci ke formula terburuk-nya sendiri (rank 1) di semua
-// slot Gen 2 — yaitu posisi yang nilai TERBURUKNYA adalah yang PALING KECIL dari SELURUH
-// posisi (A+C+K+E digabung jadi satu, bukan per-posisi sendiri-sendiri). Rank-1 sebuah
-// posisi otomatis sudah jadi nilai terkecil DI POSISI ITU (list terurut tertinggi→terendah),
-// jadi cukup bandingkan rank-1 tiap posisi untuk dapat pemenang globalnya.
-// Dasi (persentase sama persis) dimenangkan oleh posisi yang index-nya lebih kecil di
-// posLabels (lebih dulu dalam urutan A-C-K-E).
-function fxFindGen2LockedPosition(posLabels, recsByLabel){
-  let winner = null; // { label, idx, pct, rec }
-  posLabels.forEach((label, idx) => {
-    const list = (recsByLabel && recsByLabel[label]) || [];
-    const rec = pickWorstRank(list, 1);
-    if(!rec) return;
-    if(!winner || rec.pct < winner.pct || (rec.pct === winner.pct && idx < winner.idx)){
-      winner = { label, idx, pct: rec.pct, rec };
-    }
-  });
-  return winner;
-}
-
-// Pilih rec (formula) satu posisi untuk satu slot Gen 2, dengan mempertimbangkan posisi
-// yang sedang terkunci global (dari fxFindGen2LockedPosition): posisi pemenang SELALU
-// pakai rank-1 di ketiga slot; posisi lain tetap ikut WORST_RANK_BY_SLOT seperti biasa.
-function fxPickGen2Rec(slot, label, list, lockedPosition){
-  const rank = (lockedPosition && lockedPosition.label === label) ? 1 : (WORST_RANK_BY_SLOT[slot] || 1);
-  return pickWorstRank(list, rank);
-}
-
-// Hitung pool Gen2 untuk SATU slot memakai Formula X yang SEDANG aktif/tampil di layar
-// (FX_RECOMMENDATIONS live) — dipakai saat tombol Kunci 2A/2B/2C diklik manual.
-function fxBuildGen2PoolsLive(slot, posLabels, used){
-  if(!FX_FORMULAS_CACHE || !FX_RECOMMENDATIONS) return null;
-  const byKey = {};
-  FX_FORMULAS_CACHE.formulas.forEach(f => { byKey[f.key]=f; });
-  const lockedPosition = fxFindGen2LockedPosition(posLabels, FX_RECOMMENDATIONS);
-  const pools = [];
-  for(let i=0; i<posLabels.length; i++){
-    const label = posLabels[i];
-    const list = FX_RECOMMENDATIONS[label] || [];
-    if(!list.length){ pools.push([]); continue; }
-    const chosen = fxPickGen2Rec(slot, label, list, lockedPosition);
-    const f = chosen ? byKey[chosen.key] : null;
-    let pool = [];
-    if(f){ try{ pool = f.fn(used)[i]||[]; }catch(e){} }
-    pools.push(pool);
-  }
-  return pools;
-}
-
-// Versi "murni" dari computeFormulaX: menghitung rekomendasi Formula X untuk trendN/controlN/outN
-// TERTENTU (bukan yang sedang tampil di dropdown), TANPA mengubah FX_RECOMMENDATIONS / FX_SELECTED /
-// FX_TOUCHED / FX_FORMULAS_CACHE / tampilan layar yang sedang aktif. Ini dipakai supaya tiap slot
-// Gen 2 (2A/2B/2C) bisa dihitung ulang persis sesuai Tren N/Control N/Out N miliknya sendiri
-// masing-masing — walau slot lain atau layar utama sedang pakai kombinasi lain.
-function computeFormulaXPure(used, posLabels, trendNRaw, controlNRaw, outNRaw){
-  const outN = parseInt(outNRaw, 10) || 8;
-  const controlN = controlNRaw === 'all' ? Infinity : parseInt(controlNRaw, 10);
-  const trendN = trendNRaw === 'all' ? Infinity : parseInt(trendNRaw, 10);
-  // PENTING: FX_OUT_N harus sudah = outN SEBELUM formula di-ranking (fxTrendAccuracy di bawah
-  // memakai FX_OUT_N global untuk memotong pool tiap formula saat mengecek hit/miss). Kalau
-  // di-set belakangan (setelah ranking), ranking akan memakai FX_OUT_N basi/sisa sesi
-  // sebelumnya (bug lama: dampaknya kelihatan saat Gen2 dihitung ulang lewat Preset — formula
-  // "terburuk" yang kepilih bisa beda dari hasil manual Hitung Ulang, walau Out N yang tampil
-  // di label sama).
-  const prevOutNForRanking = FX_OUT_N;
-  FX_OUT_N = outN;
-  const chronoNum = used.slice().reverse();
-  const formulas = fxBuildFormulaList(posLabels, controlN);
-  const recs = {};
-  posLabels.forEach((label, idx) => {
-    const arr = [];
-    formulas.forEach(f => {
-      const r = fxTrendAccuracy(f, chronoNum, controlN, trendN, idx);
-      if(r.total > 0) arr.push({ key: f.key, label: f.label, source: f.source, hit: r.hit, total: r.total, pct: r.pct });
-    });
-    arr.sort((a, b) => b.pct - a.pct);
-    recs[label] = arr;
-  });
-  FX_OUT_N = prevOutNForRanking; // pulihkan — pemanggil (mis. fxBuildGen2PoolsForSlot) yang mengatur FX_OUT_N saat memotong pool akhir
-  return { recs, formulas, outN };
-}
-
-// Bangun pool satu slot Gen 2 dari RULE tersimpan (trendN/controlN/outN milik slot itu
-// sendiri) + peringkat terburuk tetap sesuai slotnya (lihat WORST_RANK_BY_SLOT) — bukan
-// dari konfigurasi Formula X yang sedang aktif di layar, dan bukan dari selected/touched.
-function fxBuildGen2PoolsForSlot(slot, posLabels, used, rule){
-  if(!rule) return null;
-  const { recs, formulas, outN } = computeFormulaXPure(used, posLabels, rule.trendN, rule.controlN, rule.outN);
-  const byKey = {};
-  formulas.forEach(f => { byKey[f.key] = f; });
-  const lockedPosition = fxFindGen2LockedPosition(posLabels, recs);
-  const prevOutN = FX_OUT_N;
-  FX_OUT_N = outN; // sementara — dipulihkan lagi di finally, tidak mengganggu tampilan/slot lain
-  try{
-    const pools = [];
-    for(let i=0; i<posLabels.length; i++){
-      const label = posLabels[i];
-      const list = recs[label] || [];
-      if(!list.length){ pools.push([]); continue; }
-      const chosen = fxPickGen2Rec(slot, label, list, lockedPosition);
-      const f = chosen ? byKey[chosen.key] : null;
-      let pool = [];
-      if(f){ try{ pool = f.fn(used)[i] || []; }catch(e){} }
-      pools.push(pool);
-    }
-    return pools;
-  } finally {
-    FX_OUT_N = prevOutN;
-  }
-}
-
-// Coba terapkan aturan tersimpan (s.rule) satu slot Gen2 memakai data TERKINI.
-// Dipanggil saat: (1) periode/data berganti & slot ini sedang terkunci, (2) preset dimuat,
-// (3) Data Historis baru selesai diproses padahal sebelumnya slot ini masih "menunggu data".
-// Return true kalau berhasil dihitung & dikunci ulang.
-function fxApplyGen2Rule(slot){
-  const s = fxGen2State[slot];
-  if(!s.rule) return false;
-  if(!lastPosLabels || !lastPosLabels.length || !lastHistoryNumbers.length) return false;
-  const pools = fxBuildGen2PoolsForSlot(slot, lastPosLabels, lastHistoryNumbers, s.rule);
-  if(!pools || pools.some(p => !p.length)) return false;
-  s.locked = true;
-  s.pools = pools;
-  s.posLabels = lastPosLabels.slice();
-  s.fp = dataFingerprint(lastHistoryNumbers);
-  return true;
-}
-
-// Ambil angka BAHAN mentah satu slot Gen2 saja (tidak digabung dgn slot lain).
-// Format per posisi: "A:98765, C:16892, K:01928, E:12345". null kalau slot
-// tidak dikunci / belum ada poolnya.
-function rekapGen2SlotLine(slot, posLabels){
-  const s = fxGen2State[slot];
-  if(!s || !s.locked || !Array.isArray(s.pools)) return null;
-  if(!s.pools.some(p => Array.isArray(p) && p.length)) return null;
-  return posLabels.map((l, i) => `${l}:${(s.pools[i] || []).join('')}`).join(', ');
-}
-
-// Kumpulkan angka bahan Gen2 untuk Rekap: satu baris per slot (A/B/C), TANPA
-// digabung/union — supaya benar-benar "bahan", bukan "jadi". Kalau tidak ada
-// satupun slot yang dikunci tapi filter Gen2 tetap dicentang aktif, sertakan
-// pool live sebagai catatan tambahan (field terpisah: live).
-function rekapGen2Lines(posLabels, used){
-  const lines = { A: null, B: null, C: null, live: null };
-  if(!Array.isArray(posLabels) || !posLabels.length) return lines;
-
-  let anyLocked = false;
-  FX_GEN2_SLOTS.forEach(sl => {
-    const line = rekapGen2SlotLine(sl, posLabels);
-    lines[sl] = line;
-    if(line) anyLocked = true;
-  });
-
-  if(!anyLocked){
-    const livePools = fxBuildGen2PoolsLive('A', posLabels, used);
-    if(livePools && livePools.some(p => Array.isArray(p) && p.length)){
-      lines.live = posLabels.map((l, i) => `${l}:${(livePools[i] || []).join('')}`).join(', ');
-    }
-  }
-  return lines;
-}
-
-// Render chip digit per posisi
-function renderDigitsRow(elId, pools, posLabels, color){
-  const row = document.getElementById(elId);
-  if(!row) return;
-  if(!pools || !posLabels){
-    row.innerHTML = '<span style="font-size:11px;color:var(--ink-dim);">Hitung Frekuensi dulu.</span>';
-    return;
-  }
-  row.innerHTML = posLabels.map((lbl,i)=>{
-    const d = (pools[i]||[]).join('');
-    return `<div style="background:var(--panel);border:1px solid ${color};border-radius:8px;padding:5px 9px;text-align:center;min-width:48px;">
-      <div style="font-size:9px;color:${color};text-transform:uppercase;font-weight:700;margin-bottom:2px;">${lbl}</div>
-      <div style="font-family:var(--mono);font-size:13px;font-weight:800;color:var(--ink);">${d||'-'}</div>
-    </div>`;
-  }).join('');
-}
-
-// ── Render Gen 1 Lock UI ──
-function renderGen1LockUI(){
-  const btn   = document.getElementById('fxGen1LockBtn');
-  const badge = document.getElementById('fxGen1LockBadge');
-  const note  = document.getElementById('fxGen1LockedNote');
-  const card  = document.getElementById('fxGen1Card');
-  if(!btn) return;
-  if(fxGen1Locked){
-    btn.textContent = '🔓 UNLOCK GEN 1';
-    btn.style.cssText += 'border-color:var(--amber);color:var(--amber);';
-    badge.style.display = 'inline';
-    note.style.display  = 'block';
-    card.style.borderColor = 'var(--amber)';
-    renderDigitsRow('fxGen1DigitsRow', fxGen1LockedPools, fxGen1LockedPosLabels, 'var(--amber)');
-  } else {
-    btn.textContent = '🔒 LOCK GEN 1';
-    btn.style.cssText += 'border-color:var(--teal);color:var(--teal);';
-    badge.style.display = 'none';
-    note.style.display  = 'none';
-    card.style.borderColor = 'var(--teal)';
-    if(lastPosLabels && lastHistoryNumbers.length && FX_RECOMMENDATIONS)
-      renderDigitsRow('fxGen1DigitsRow', fxBuildGen1Pools(lastPosLabels, lastHistoryNumbers), lastPosLabels, 'var(--teal)');
-    else renderDigitsRow('fxGen1DigitsRow', null, null, 'var(--teal)');
-  }
-}
-
-// ── Render Gen 2 Lock UI per slot ──
-function renderGen2LockUI(slot){
-  const s     = fxGen2State[slot];
-  const btn   = document.getElementById('fxGen2'+slot+'LockBtn');
-  const badge = document.getElementById('fxGen2'+slot+'LockBadge');
-  const note  = document.getElementById('fxGen2'+slot+'LockedNote');
-  const card  = document.getElementById('fxGen2'+slot+'Card');
-  const info  = document.getElementById('fxGen2'+slot+'RuleInfo');
-  if(!btn) return;
-  const rankLabel = 'terburuk ke-' + (WORST_RANK_BY_SLOT[slot] || 1);
-  if(s.locked){
-    btn.textContent = '🔓 UNLOCK 2'+slot;
-    btn.style.cssText += 'border-color:var(--rose);color:var(--rose);background:rgba(217,112,122,.12);';
-    badge.style.display = 'inline';
-    note.style.display  = 'block';
-    card.style.borderColor = 'var(--rose)';
-    renderDigitsRow('fxGen2'+slot+'DigitsRow', s.pools, s.posLabels, 'var(--rose)');
-    if(info){
-      const r = s.rule || {};
-      const trendTxt = r.trendN === 'all' ? 'semua' : r.trendN;
-      const controlTxt = r.controlN === 'all' ? 'semua' : r.controlN;
-      info.textContent = `Tren N:${trendTxt} · Control N:${controlTxt} · Out N:${r.outN} · peringkat ${rankLabel}`;
-    }
-  } else {
-    btn.textContent = '🔒 LOCK 2'+slot;
-    btn.style.cssText += 'border-color:rgba(217,112,122,.6);color:var(--rose);background:transparent;';
-    badge.style.display = 'none';
-    note.style.display  = 'none';
-    card.style.borderColor = 'rgba(217,112,122,.4)';
-    if(info) info.textContent = `Akan pakai Tren/Control/Out yang sedang tampil di layar · peringkat ${rankLabel}`;
-    // Tampilkan live preview Gen 2 (angka peringkat terburuk ke-N sesuai slot ini)
-    if(lastPosLabels && lastHistoryNumbers.length && FX_RECOMMENDATIONS)
-      renderDigitsRow('fxGen2'+slot+'DigitsRow', fxBuildGen2PoolsLive(slot, lastPosLabels, lastHistoryNumbers), lastPosLabels, 'rgba(217,112,122,.7)');
-    else renderDigitsRow('fxGen2'+slot+'DigitsRow', null, null, 'var(--rose)');
-  }
-  // Update status berapa slot terkunci
-  const lockedCount = FX_GEN2_SLOTS.filter(sl => fxGen2State[sl].locked).length;
-  const statusEl = document.getElementById('fxGen2LockStatus');
-  if(statusEl) statusEl.textContent = lockedCount
-    ? lockedCount + ' dari 3 slot Gen 2 terkunci — akan dipakai sebagai filter berlapis.'
-    : 'Belum ada slot Gen 2 yang dikunci.';
-}
-
-// ── Mode Auto: kunci Gen 1 otomatis sesuai FX_SELECTED yang tersimpan di Preset Aktif
-// (posisi/urutan radio per posisi A/C/K/E — BUKAN dipaksa rank #1 lagi). Dipanggil SETIAP KALI
-// analyze() selesai di Mode Auto, SEBELUM fxAutoUnlockAll/fxAutoGenerate dijalankan — supaya
-// Gen 2 & Auto Generate langsung memakai Gen 1 yang sudah terkunci segar, bukan pool "live"
-// yang belum tentu sama.
-//
-// ALUR (v4 — selalu buka-isi-kunci ulang, tidak lagi bercabang manual/auto):
-//   1) Kalau Gen 1 masih terkunci (apapun jenis kuncinya) → UNLOCK dulu.
-//   2) Pastikan data yang dibaca sudah SEGAR (bukan fingerprint lama sisa siklus sebelumnya) —
-//      kalau masih kebaca data lama, refresh + hitung ulang Formula X lagi (retry beberapa kali)
-//      sampai fingerprint berubah atau percobaan habis (data memang belum ganti periode).
-//   3) Isi pool sesuai Preset Aktif / FX_SELECTED (lewat fxBuildGen1Pools) — proses "simpan"-nya
-//      TIDAK perlu ditangani manual di sini, karena sudah otomatis mengikuti preset yang
-//      disalurkan ke FX_SELECTED.
-//   4) LOCK kembali Gen 1 dengan pool/fingerprint yang baru.
-//
-// PENTING soal urutan eksekusi: computeFormulaX() SELALU me-reset FX_SELECTED ke rank #1 untuk
-// posisi yang belum "disentuh". Yang biasanya menimpa FX_SELECTED balik ke preset adalah
-// presetApplyExtraNow(), tapi itu dipasang lewat hook MutationObserver #fxStatus yang jalan
-// ASYNC (microtask) — kalau fungsi ini dipanggil sinkron persis setelah computeFormulaX()
-// (seperti di pipeline Mode Auto), hook itu BELUM SEMPAT jalan. Makanya di sini
-// presetApplyExtraNow(presetPendingExtra) dipanggil LANGSUNG & SINKRON dulu sebelum
-// fxBuildGen1Pools — supaya FX_SELECTED sudah pasti sesuai preset saat pool Gen 1 dihitung,
-// bukan diam-diam kebaca rank #1 bawaan reset tadi.
-async function fxAutoLockGen1FromPreset(maxAttempts = 3, delayMs = 300){
-  // 1) Masih terkunci? Buka dulu — supaya isi Gen 1 selalu dihitung bersih dari preset terkini,
-  // bukan menimpa/bercampur dengan pool lama yang masih tersimpan.
-  if(fxGen1Locked){
-    fxGen1Locked = false;
-    fxGen1LockedPools = null;
-    fxGen1LockedPosLabels = null;
-  }
-  const staleFP = fxGen1LockedFP; // fingerprint kunci SEBELUMNYA — patokan "data lama"
-
-  // 2) Pastikan data yang lagi kebaca sudah segar (bukan fingerprint lama peninggalan siklus
-  // sebelumnya). Kalau masih sama persis dengan staleFP, refresh + hitung ulang Formula X lagi.
-  for(let attempt = 1; attempt <= maxAttempts; attempt++){
-    if(!FX_RECOMMENDATIONS || !lastPosLabels || !lastPosLabels.length || !lastHistoryNumbers.length) return false;
-    const fpNow = dataFingerprint(lastHistoryNumbers);
-    if(!staleFP || fpNow !== staleFP) break; // sudah segar (atau memang belum pernah dikunci)
-    if(attempt >= maxAttempts) break; // percobaan habis — data memang belum ganti, lanjut apa adanya
-    fxRefreshHistoryIfTerbaru();
-    if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
-    await fxSleep(delayMs);
-  }
-
-  // 3) Preset Aktif tetap SELALU diterapkan dulu, utuh (bulkOut, Top Posisi, Twin Murni, Shio,
-  // DAN fxSelected bawaan preset) — supaya bagian-bagian lain di luar Gen1 tidak ikut hilang.
-  if(presetPendingExtra && typeof presetApplyExtraNow === 'function') presetApplyExtraNow(presetPendingExtra);
-
-  // 3b) Kalau dropdown "Pilih Sumber GEN1" (#autoGen1SourceSelect) = "auto", TIMPA FX_SELECTED
-  // yang barusan dipasang preset dengan hasil optimizer Auto% (Wilson -> Posisi%), dihitung ULANG
-  // setiap siklus ini supaya formula per posisi selalu ikut akurasi data terbaru, bukan preset.
-  // Kalau "manual" (default lama, arti sebenarnya "ikuti Preset") -> tidak ada perubahan sama sekali.
-  const gen1SourceEl = document.getElementById('autoGen1SourceSelect');
-  const gen1Source = gen1SourceEl ? gen1SourceEl.value : 'manual';
-  if(gen1Source === 'auto' && typeof fxRunAutoPercentCore === 'function'){
-    fxRunAutoPercentCore();
-  }
-
-  const pools = fxBuildGen1Pools(lastPosLabels, lastHistoryNumbers); // ikut FX_SELECTED (Auto% atau Preset)
-  if(!pools) return false;
-
-  // 4) Kunci kembali Gen 1 dengan data segar.
-  fxGen1Locked = true;
-  fxGen1AutoLocked = true;
-  fxGen1SemiAutoLocked = false;
-  fxGen1LockedPools = pools;
-  fxGen1LockedPosLabels = lastPosLabels.slice();
-  fxGen1LockedFP = dataFingerprint(lastHistoryNumbers);
-  renderGen1LockUI();
-  return true;
-}
-
-// ── Gen 2 Auto% (dropdown "Pilih Sumber GEN2" = auto) — TERPISAH TOTAL dari jalur Manual
-// (fxApplyGen2Rule/computeFormulaXPure/pickWorstRank/WORST_RANK_BY_SLOT di atas SAMA SEKALI
-// TIDAK disentuh/diubah oleh fungsi ini, supaya Manual tetap presis seperti sebelumnya). ──
-//
-// Alur: SATU KALI pencarian dibalik (Wilson dibalik -> Posisi% dibalik, lihat fxSearchWorstN/
-// fxSearchWorstPosisiCombos di formula.js) menghasilkan 1 pasang Control N/Tren N + 3 kombinasi
-// formula per posisi berperingkat TERENDAH ke-1/2/3 SEKALIGUS — bukan 3x pencarian terpisah.
-// Peringkat terendah ke-1 -> Gen2A, ke-2 -> Gen2B, ke-3 -> Gen2C, lalu langsung dikunci.
-//
-// Out N tiap slot TETAP ikut Preset (s.rule.outN yang sudah dimuat presetApplyGen2 — trendN/
-// controlN di rule itu TIDAK dipakai di sini, cuma outN-nya yang dipinjam) — supaya preset
-// Out 7,7,7 atau 5,6,7 tetap kepakai persis, walau metode pemilihan formulanya sudah beda.
-// Pencarian sendiri (ranking) pakai Out N yang SEDANG AKTIF di dropdown Formula X sekarang
-// sebagai acuan tunggal — tidak ikut dicari/diubah (sama seperti fxSearchBestN Gen1).
-function fxAutoLockGen2FromAutoPercent(){
-  if(!lastPosLabels || !lastPosLabels.length || !lastHistoryNumbers.length) return false;
-  if(typeof fxSearchWorstN !== 'function' || typeof fxSearchWorstPosisiCombos !== 'function') return false;
-
-  const worstN = fxSearchWorstN(lastHistoryNumbers, lastPosLabels);
-  if(!worstN) return false;
-
-  const combos = fxSearchWorstPosisiCombos(lastHistoryNumbers, lastPosLabels, worstN.controlN, worstN.trendN, FX_GEN2_SLOTS.length);
-  if(!combos.length) return false;
-
-  const formulas = fxBuildFormulaList(lastPosLabels, worstN.controlN);
-  const byKey = {};
-  formulas.forEach(f => { byKey[f.key] = f; });
-
-  const fp = dataFingerprint(lastHistoryNumbers);
-  const fallbackOutN = document.getElementById('fxOutN') ? document.getElementById('fxOutN').value : '8';
-  let anyOk = false;
-
-  FX_GEN2_SLOTS.forEach((slot, i) => {
-    // Kombinasi kurang dari 3 (data historis masih sangat sedikit) -> slot sisa pakai kombinasi
-    // paling buruk yang tersedia terakhir, daripada dibiarkan kosong.
-    const combo = combos[i] || combos[combos.length - 1];
-    if(!combo) return;
-    const s = fxGen2State[slot];
-    const outNRaw = (s.rule && s.rule.outN) ? s.rule.outN : fallbackOutN; // Out N ikut Preset per slot
-    const prevOutN = FX_OUT_N;
-    FX_OUT_N = parseInt(outNRaw, 10) || 8;
-    try{
-      const pools = lastPosLabels.map((label, idx) => {
-        const f = byKey[combo.picks[label]];
-        let pool = [];
-        if(f){ try{ pool = f.fn(lastHistoryNumbers)[idx] || []; }catch(e){} }
-        return pool;
-      });
-      if(pools.some(p => !p.length)) return;
-      s.locked = true;
-      s.pools = pools;
-      s.posLabels = lastPosLabels.slice();
-      s.fp = fp;
-      anyOk = true;
-    } finally {
-      FX_OUT_N = prevOutN;
-    }
-  });
-
-  return anyOk;
-}
-
-// ── Auto-unlock semua saat pasaran berganti ──
-function fxAutoUnlockAll(){
-  const fp = dataFingerprint(lastHistoryNumbers);
-  if(!fp) return;
-  // Gen 1 yang dikunci otomatis oleh Mode Auto (fxGen1AutoLocked) KEBAL di sini — bukan berarti
-  // tidak pernah diperbarui, tapi karena pembaruannya sudah ditangani langsung oleh
-  // fxAutoLockGen1FromPreset() tiap siklus analyze(), bukan lewat unlock-lalu-nganggur di sini.
-  if(fxGen1Locked && !fxGen1SemiAutoLocked && !fxGen1AutoLocked && fp !== fxGen1LockedFP){
-    fxGen1Locked=false; fxGen1LockedPools=null; fxGen1LockedPosLabels=null; fxGen1LockedFP='';
-    renderGen1LockUI();
-  }
-  FX_GEN2_SLOTS.forEach(sl => {
-    const s = fxGen2State[sl];
-    // Slot yang punya rule tersimpan (baik masih terkunci dgn fp basi, ATAU baru dimuat dari
-    // preset & belum sempat dihitung karena data belum siap) — coba hitung ulang dulu.
-    if(s.rule && (!s.locked || fp !== s.fp)){
-      const ok = fxApplyGen2Rule(sl);
-      if(!ok && s.locked){ s.locked=false; s.pools=null; s.posLabels=null; s.fp=''; }
-      renderGen2LockUI(sl);
-    } else if(s.locked && !s.rule && fp !== s.fp){
-      // Data lama (dikunci sebelum fitur rule ini ada) — fallback ke perilaku lama: unlock.
-      s.locked=false; s.pools=null; s.posLabels=null; s.fp='';
-      renderGen2LockUI(sl);
-    }
-  });
-}
-
-// Cek apakah SEMUA slot Gen 2 yang punya rule tersimpan (dikunci lewat Preset) sudah
-// cocok dengan data historis TERKINI (fp sama & locked=true). Slot tanpa rule tersimpan
-// tidak dihitung — tidak ada yang perlu disinkronkan untuk slot itu.
-function fxGen2AllRuleSlotsSynced(){
-  const fp = dataFingerprint(lastHistoryNumbers);
-  return FX_GEN2_SLOTS.every(sl => {
-    const s = fxGen2State[sl];
-    if(!s.rule) return true;
-    return s.locked && s.fp === fp;
-  });
-}
-
-function fxSleep(ms){ return new Promise(res => setTimeout(res, ms)); }
-
-// ── Kunci/lepas semua tombol Mode (Beranda & Analisis, sama-sama pakai class .modeBtn) selama
-// proses berat/pipeline berjalan — supaya tidak bisa diklik pindah mode di tengah pipeline lain
-// sedang jalan (mis. klik Normal saat pipeline Semi Auto/Auto belum selesai). Dipakai bersamaan
-// dengan showLoadingOverlay/hideLoadingOverlay di setiap titik masuk pipeline (modeNormalBtn,
-// semiAutoActivateBtn, dan firebaseLoadSelectedData di database.js untuk jalur Mode Auto/ganti
-// pasaran) — overlay saja tidak cukup karena ada jalur (semiAutoActivateBtn) yang sebelumnya
-// tidak dibungkus overlay sama sekali.
-function setModeButtonsDisabled(disabled){
-  document.querySelectorAll('.modeBtn').forEach(btn => { btn.disabled = disabled; });
-}
-
-// ── Pastikan Gen 2 sesuai Preset SEBELUM Auto Generate jalan (Mode Auto/Semi Auto) ──
-// Saat pindah pasaran cepat, data historis (lastHistoryNumbers) kadang baru benar-benar
-// sinkron sesaat setelah siklus ini mulai (mis. datang dari Firebase). fxAutoUnlockAll()
-// sendiri sudah mencoba fxApplyGen2Rule() per slot, tapi kalau gagal cuma sekali coba lalu
-// menyerah ke unlock. Fungsi ini mengulang percobaan itu (default 3x, jeda singkat di
-// antaranya) memakai data TERBARU tiap percobaan — supaya slot yang sudah dikunci lewat
-// Preset TIDAK PERNAH diam-diam lepas ke pool live hanya karena satu percobaan pertama
-// meleset. Kalau tetap gagal setelah semua percobaan, pemanggil WAJIB berhenti (jangan
-// lanjut ke fxAutoGenerate) dan memberi tahu user — lihat runAutoPipelineAfterFormulaX().
-async function fxEnsureGen2MatchesPreset(maxAttempts = 3, delayMs = 300){
-  for(let attempt = 1; attempt <= maxAttempts; attempt++){
-    fxAutoUnlockAll();
-    if(fxGen2AllRuleSlotsSynced()) return true;
-    if(attempt < maxAttempts) await fxSleep(delayMs);
-  }
-  return fxGen2AllRuleSlotsSynced();
-}
-
-// ── Tombol Lock Gen 1 ──
-document.getElementById('fxGen1LockBtn').addEventListener('click', ()=>{
-  // Klik manual selalu mengambil alih dari status auto-lock Mode Auto (kalau ada).
-  fxGen1AutoLocked = false;
-  if(fxGen1Locked){
-    fxGen1Locked=false; fxGen1LockedPools=null; fxGen1LockedPosLabels=null; fxGen1LockedFP='';
-  } else {
-    if(!FX_RECOMMENDATIONS||!lastPosLabels||!lastHistoryNumbers.length){ alert('Hitung Frekuensi dulu sebelum mengunci Gen 1.'); return; }
-    const p = fxBuildGen1Pools(lastPosLabels, lastHistoryNumbers);
-    if(!p){ alert('Formula X belum siap — coba Hitung Ulang.'); return; }
-    fxGen1Locked=true; fxGen1LockedPools=p; fxGen1LockedPosLabels=lastPosLabels.slice(); fxGen1LockedFP=dataFingerprint(lastHistoryNumbers);
-  }
-  renderGen1LockUI();
-});
-
-// ── Tombol Lock Gen 2A/2B/2C ──
-document.querySelectorAll('.fxGen2LockBtn').forEach(btn => {
-  btn.addEventListener('click', ()=>{
-    const slot = btn.dataset.slot;
-    const s = fxGen2State[slot];
-    if(s.locked){
-      s.locked=false; s.pools=null; s.posLabels=null; s.fp=''; s.rule=null;
-    } else {
-      if(!FX_RECOMMENDATIONS||!lastPosLabels||!lastHistoryNumbers.length){ alert('Hitung Frekuensi dulu sebelum mengunci Gen 2'+slot+'.'); return; }
-      const p = fxBuildGen2PoolsLive(slot, lastPosLabels, lastHistoryNumbers);
-      if(!p || p.some(x=>!x.length)){ alert('Peringkat terburuk ke-'+WORST_RANK_BY_SLOT[slot]+' belum tersedia untuk salah satu posisi — coba Hitung Ulang dulu.'); return; }
-      s.locked=true; s.pools=p; s.posLabels=lastPosLabels.slice(); s.fp=dataFingerprint(lastHistoryNumbers);
-      // Simpan Tren N/Control N/Out N saat ini — supaya slot ini bisa dihitung ulang persis
-      // dengan kombinasi yang sama kalau data/periode berganti atau preset dimuat lagi.
-      // Peringkat terburuk (WORST_RANK_BY_SLOT) sudah tetap mengikuti slotnya sendiri.
-      s.rule = {
-        trendN: document.getElementById('fxTrendN').value,
-        controlN: document.getElementById('fxControlN').value,
-        outN: document.getElementById('fxOutN').value
-      };
-    }
-    renderGen2LockUI(slot);
-  });
-});
-
-// ── Fungsi utama Auto Generate ──
-function fxAutoGenerate(){
-  if(!FX_RECOMMENDATIONS||!lastPosLabels||!lastHistoryNumbers.length){
-    alert('Hitung Frekuensi dulu.'); return;
-  }
-
-  const withFilter = document.getElementById('fxAutoFilterWorst').checked;
-
-  // Gen 1
-  const gen1Pools = (fxGen1Locked && fxGen1LockedPools)
-    ? fxGen1LockedPools
-    : fxBuildGen1Pools(lastPosLabels, lastHistoryNumbers);
-  if(!gen1Pools){ alert('Formula X belum siap — coba Hitung Ulang.'); return; }
-
-  const gen1Results = cartesianProduct(gen1Pools);
-
-  // Gen 2A/B/C — kumpulkan semua angka dari slot yang terkunci (atau live jika tidak ada yg terkunci)
-  let eliminasiSet = new Set();
-  let gen2Details = {}; // untuk tampilan ringkasan
-
-  if(withFilter){
-    const lockedSlots = FX_GEN2_SLOTS.filter(sl => fxGen2State[sl].locked);
-    const slotsToUse  = lockedSlots.length > 0 ? lockedSlots : []; // hanya pakai yang dikunci
-
-    // Jika tidak ada yang dikunci, pakai live pools (Gen 2 tanpa lock)
-    if(slotsToUse.length === 0){
-      const livePools = fxBuildGen2PoolsLive('A', lastPosLabels, lastHistoryNumbers);
-      if(livePools && livePools.some(p=>p.length)){
-        const liveResults = cartesianProduct(livePools);
-        liveResults.forEach(n => eliminasiSet.add(n));
-        gen2Details['Live'] = liveResults.length;
+// (5) Fade-in halus tiap kali card hasil (resultCard/jsCard/bulkCard/filterCard) ditampilkan lewat style.display
+(function(){
+  const revealIds = ['resultCard','jsCard','bulkCard','filterCard'];
+  revealIds.forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    const obs = new MutationObserver(() => {
+      if(el.style.display === 'block' && el.dataset.revealed !== '1'){
+        el.dataset.revealed = '1';
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px)';
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          el.style.opacity = '1';
+          el.style.transform = 'translateY(0)';
+        }));
+      } else if(el.style.display === 'none'){
+        el.dataset.revealed = '0';
       }
-    } else {
-      slotsToUse.forEach(sl => {
-        const s = fxGen2State[sl];
-        if(s.pools && s.pools.some(p=>p.length)){
-          const r = cartesianProduct(s.pools);
-          r.forEach(n => eliminasiSet.add(n));
-          gen2Details[sl] = r.length;
-        }
-      });
-    }
-  }
-
-  const eliminasi  = gen1Results.filter(n => eliminasiSet.has(n));
-  const hasilAkhir = gen1Results.filter(n => !eliminasiSet.has(n));
-
-  // ── Update UI ──
-  document.getElementById('fxAutoGenSummary').style.display  = 'block';
-  document.getElementById('fxAutoGenResultBox').style.display = 'block';
-  document.getElementById('fxAutoGenStats').style.display    = 'flex';
-  document.getElementById('fxAutoGenActions').style.display  = 'flex';
-
-  // Gen 1 preview
-  document.getElementById('fxGen1Preview').textContent =
-    gen1Results.slice(0,16).join('*') + (gen1Results.length>16?'*…':'*');
-  document.getElementById('fxGen1Count').textContent =
-    gen1Results.length + ' kombinasi' + (fxGen1Locked?' 🔒':'');
-
-  // Gen 2 ringkasan per slot
-  const showNoGen2 = !withFilter || Object.keys(gen2Details).length===0;
-  document.getElementById('fxSumNoGen2').style.display = showNoGen2 ? 'block' : 'none';
-  FX_GEN2_SLOTS.forEach(sl => {
-    const box = document.getElementById('fxSumGen2'+sl);
-    if(gen2Details[sl]!==undefined){
-      box.style.display='block';
-      document.getElementById('fxSumGen2'+sl+'Count').textContent = gen2Details[sl]+' kombinasi 🔒';
-    } else {
-      box.style.display='none';
-    }
+    });
+    obs.observe(el, { attributes: true, attributeFilter: ['style'] });
   });
-
-  // Eliminasi total
-  const elimBox = document.getElementById('fxEliminasiBox');
-  if(eliminasi.length){
-    elimBox.style.display='block';
-    document.getElementById('fxEliminasiList').textContent = eliminasi.slice(0,40).join('*')+(eliminasi.length>40?'*…':'*');
-    document.getElementById('fxEliminasiCount').textContent = eliminasi.length+' angka dieliminasi dari '+Object.keys(gen2Details).length+' slot Gen 2';
-  } else {
-    elimBox.style.display='none';
-  }
-
-  // Hasil akhir
-  const hasilText = hasilAkhir.join('*')+(hasilAkhir.length?'*':'');
-  document.getElementById('fxAutoGenOut').value = hasilText;
-  document.getElementById('fxAutoGenCount').textContent = hasilAkhir.length;
-  document.getElementById('fxAutoEliminasiCount').textContent = eliminasi.length;
-
-  lastTop8Pools = gen1Pools;
-}
-
-document.getElementById('fxAutoGenBtn').addEventListener('click', fxAutoGenerate);
-
-document.getElementById('fxAutoGenCopyBtn').addEventListener('click', ()=>{
-  const text = document.getElementById('fxAutoGenOut').value;
-  if(!text) return;
-  navigator.clipboard.writeText(text).then(()=>{
-    const btn = document.getElementById('fxAutoGenCopyBtn');
-    const orig = btn.textContent;
-    btn.textContent='Tersalin ✓';
-    setTimeout(()=>btn.textContent=orig, 1400);
-  }).catch(()=>{ const ta=document.getElementById('fxAutoGenOut'); ta.select(); document.execCommand('copy'); });
-});
-
-document.getElementById('fxAutoGenToFilterBtn').addEventListener('click', ()=>{
-  const text = document.getElementById('fxAutoGenOut').value;
-  if(!text){ alert('Generate dulu sebelum mengirim ke Filter.'); return; }
-  const hasilList = text.split('*').map(s=>s.trim()).filter(Boolean);
-  if(!hasilList.length){ alert('Generate dulu sebelum mengirim ke Filter.'); return; }
-
-  document.getElementById('combineOut').value = text;
-  document.getElementById('combineCountOut').textContent = hasilList.length;
-
-  // Pakai daftar hasil AKHIR (sudah dieliminasi Gen 2) apa adanya sebagai sumber Filter —
-  // bukan lastTop8Pools (pool mentah Gen 1) — supaya angka yang sudah dieliminasi tidak
-  // muncul lagi begitu masuk ke Filter Pangkas Kombinasi.
-  filterCustomSource = hasilList;
-
-  document.getElementById('filterCard').style.display = 'block';
-  document.getElementById('filterCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
-});
-
-// ── Hook: setiap Formula X selesai → auto-unlock pasaran & refresh UI ──
-(function hookAutoGenRefresh(){
-  const statusEl = document.getElementById('fxStatus');
-  if(!statusEl) return;
-  new MutationObserver(()=>{
-    fxAutoUnlockAll();
-    if(typeof presetApplyExtraNow === 'function') presetApplyExtraNow(presetPendingExtra);
-    renderGen1LockUI();
-    FX_GEN2_SLOTS.forEach(renderGen2LockUI);
-  }).observe(statusEl, { childList:true, characterData:true, subtree:true });
 })();
 
+// (1) Nav tab-panel: klik tab -> tampilkan 1 panel terkait, sembunyikan sisanya. Tab redup kalau hasilnya belum siap (belum klik Hitung Frekuensi).
+(function(){
+  const nav = document.getElementById('navTabs');
+  if(!nav) return;
+  const buttons = Array.from(nav.querySelectorAll('.tabbtn'));
+  const panels = Array.from(document.querySelectorAll('.tabpanel'));
 
-// ===================== MODE: NORMAL / SEMI AUTO / AUTO =====================
-const APP_MODE_KEY = 'appMode_v1';
-let fxGen1SemiAutoLocked = false; // true saat Gen 1 dikunci lewat popup Semi Auto (bukan lewat formula)
+  function activate(tabName, doScroll){
+    buttons.forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
+    panels.forEach(p => p.classList.toggle('active', p.dataset.tab === tabName));
+    if(doScroll){
+      const activePanel = panels.find(p => p.dataset.tab === tabName);
+      if(activePanel){
+        // Geser supaya isi tab persis mulai di bawah nav tab (nav-nya sticky/nempel di atas,
+        // jadi tidak bisa asal scrollIntoView ke posisi 0 — nanti isi tab ketutupan nav).
+        const navH = nav.getBoundingClientRect().height || 0;
+        const y = activePanel.getBoundingClientRect().top + window.pageYOffset - navH - 4;
+        window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+      }
+    }
+  }
+  buttons.forEach(b => b.addEventListener('click', () => activate(b.dataset.tab, true)));
+  if(buttons[0]) activate(buttons[0].dataset.tab, false);
+  window.gotoTab = activate;
 
-function getAppMode(){ return localStorage.getItem(APP_MODE_KEY) || 'normal'; }
-
-// Bagian TAMPILAN saja (pill aktif + kartu info yang ditampilkan) — dipisah dari commit mode
-// supaya pill "Semi Auto" bisa dipakai untuk PREVIEW halaman pengaturan tanpa langsung
-// mengaktifkan mode (mode Semi baru benar-benar commit saat tombol "Aktifkan Semi Auto" ditekan).
-function showModeView(mode){
-  document.querySelectorAll('.modeBtn').forEach(b=>{
-    b.classList.toggle('active', b.dataset.mode === mode);
+  // Tab redup selama kartu sumbernya belum ditampilkan (menunggu Hitung Frekuensi)
+  const readinessCardId = {
+    formulax: 'resultCard',
+    jumlahselisih: 'jsCard',
+    angkaikut: 'jsCard',
+    shio234: 'jsCard',
+    generator: 'bulkCard'
+  };
+  function refreshLocks(){
+    buttons.forEach(b => {
+      const cardId = readinessCardId[b.dataset.tab];
+      const card = cardId && document.getElementById(cardId);
+      const ready = !card || card.style.display !== 'none';
+      if(ready) b.removeAttribute('data-locked'); else b.setAttribute('data-locked', '1');
+    });
+  }
+  refreshLocks();
+  ['resultCard', 'jsCard', 'bulkCard'].forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    new MutationObserver(refreshLocks).observe(el, { attributes: true, attributeFilter: ['style'] });
   });
-  // Tampilkan kartu info & info box sesuai mode yang dipilih (Normal/Semi/Auto) di halaman Analisis
-  ['normal', 'semi', 'auto'].forEach(m => {
-    const suffix = (m === 'semi' ? 'Semi' : m === 'auto' ? 'Auto' : 'Normal');
-    const card = document.getElementById('modeInfo' + suffix);
-    const box = document.getElementById('modeInfoBox' + suffix);
-    if(card) card.style.display = (m === mode) ? '' : 'none';
-    if(box) box.style.display = (m === mode) ? '' : 'none';
-  });
-  const semiPanel = document.getElementById('semiAutoSettingsPanel');
-  if(semiPanel) semiPanel.style.display = (mode === 'semi') ? '' : 'none';
-  const autoPanel = document.getElementById('autoSettingsPanel');
-  if(autoPanel) autoPanel.style.display = (mode === 'auto') ? '' : 'none';
-  // Semi Auto & Auto: pengaturan sudah dikelola lewat panel masing-masing (Preset + Sumber
-  // Gen1/Gen2), jadi menu "Pengaturan Analisa" (Formula X/Jumlah & Selisih/Ai Ai/Shio 234)
-  // disembunyikan di kedua mode itu.
-  const pengaturanAnalisa = document.getElementById('pengaturanAnalisaSection');
-  if(pengaturanAnalisa) pengaturanAnalisa.style.display = (mode === 'semi' || mode === 'auto') ? 'none' : '';
-  // Sinkronkan tampilan tombol "Aktifkan Auto"/"Stop Auto" + status disabled dropdown Preset/
-  // Sumber GEN1/GEN2 ke status RIIL mode saat ini (getAppMode()) — bukan ke `mode` parameter di
-  // atas (yang cuma panel yang sedang DILIHAT/preview). Jadi walau user sedang melihat-lihat
-  // panel Normal/Semi, kalau Mode Auto sebenarnya masih berjalan, begitu balik ke panel Auto
-  // tombol & dropdown tetap kebaca "sedang berjalan".
-  if(typeof applyAutoUiRunningState === 'function'){
-    applyAutoUiRunningState(typeof getAppMode === 'function' && getAppMode() === 'auto');
+})();
+
+// (2) Badge jumlah data di judul "Data Historis", ikut nilai #totalCount
+(function(){
+  const src = document.getElementById('totalCount');
+  const badge = document.getElementById('dataCountBadge');
+  if(!src || !badge) return;
+  new MutationObserver(() => { badge.textContent = (src.textContent || '0') + ' data'; })
+    .observe(src, { childList: true, characterData: true, subtree: true });
+})();
+
+// (2) Badge sisa hasil di judul "Filter Pangkas Kombinasi", ikut nilai #filterCountOut
+(function(){
+  const src = document.getElementById('filterCountOut');
+  const badge = document.getElementById('filterCountBadge');
+  if(!src || !badge) return;
+  new MutationObserver(() => { badge.textContent = (src.textContent || '0') + ' sisa'; })
+    .observe(src, { childList: true, characterData: true, subtree: true });
+})();
+
+// ===================== PRESET PENGATURAN =====================
+// Daftar semua kontrol "pengaturan" di seluruh sistem (bukan data mentah/hasil).
+// Tambahkan entri baru di sini kalau nanti ada filter/opsi baru yang perlu ikut preset.
+const PRESET_FIELDS = [
+  // Formula X
+  { id:'fxTrendN',   type:'select' },
+  { id:'fxControlN', type:'select' },
+  { id:'fxOutN',     type:'select' },
+  { id:'fxAutoFilterWorst', type:'checkbox' },
+  { id:'fxDataSource', type:'radio', name:'fxDataSource' },
+  // Jumlah & Selisih
+  { id:'jsRowsShown',      type:'select' },
+  { id:'jsRecoCountJumlah', type:'select' },
+  { id:'jsRecoCountSelisih', type:'select' },
+  { id:'jsJumlahManual',   type:'text' },
+  { id:'jsSelisihManual',  type:'text' },
+  // Ai Ai (Angka Ikut)
+  { id:'aiDataSource',   type:'radio', name:'aiDataSource' },
+  { id:'aiRowsShown',    type:'select' },
+  { id:'aiDigitCount',   type:'select' },
+  { id:'aiWinACManual',  type:'text' },
+  { id:'aiWinCKManual',  type:'text' },
+  { id:'aiWinKEManual',  type:'text' },
+  // Colok Bebas
+  { id:'cbMonthHistorySelect', type:'select' },
+  // Shio
+  { id:'shioPickCount',  type:'select' },
+  { id:'shioRowsShown',  type:'select' },
+  { id:'shioManual',     type:'text' },
+  { id:'filterShioAll',  type:'checkbox' },
+  // Filter Pangkas Kombinasi
+  { id:'filterShortAC',       type:'checkbox' },
+  { id:'filterShortCK',       type:'checkbox' },
+  { id:'filterShortKE',       type:'checkbox' },
+  { id:'filterNoTwin',        type:'checkbox' },
+  { id:'filterExcludeHistory',type:'checkbox' },
+  { id:'filterCB',        type:'text' },
+  { id:'filterAI',        type:'text' },
+  { id:'filterAiAC',      type:'text' },
+  { id:'filterAiCK',      type:'text' },
+  { id:'filterJumlah',    type:'text' },
+  { id:'filterSelisih',   type:'text' },
+  { id:'filterHapus34',   type:'checkbox' },
+  { id:'twinMode', type:'radio', name:'twinMode' },
+];
+
+const PRESET_STORAGE_KEY = 'appPresets_v1';
+const PRESET_MAX_COUNT = 12; // sesuai permintaan: simpan sampai 12 preset
+let presetFirebaseReady = false;
+
+function presetLoadAll(){
+  try{ return JSON.parse(localStorage.getItem(PRESET_STORAGE_KEY)) || {}; }
+  catch(e){ return {}; }
+}
+function presetSaveAll(all){
+  localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(all));
+  if(db){
+    authReadyPromise.then(isAuthed => {
+      if(!isAuthed) return;
+      pendingCloudSyncCount++;
+      db.ref('appPresets').set(all)
+        .catch(e => {
+          console.error('Gagal sync preset ke cloud:', e);
+          const fb = document.getElementById('presetFeedback');
+          if(fb){ fb.textContent = 'Tersimpan lokal, tapi gagal sync preset ke cloud (cek koneksi).'; fb.style.color = 'var(--rose)'; }
+        })
+        .finally(() => { pendingCloudSyncCount--; });
+    });
   }
 }
 
-function setAppMode(mode){
-  localStorage.setItem(APP_MODE_KEY, mode);
-  showModeView(mode);
+// Muat preset awal dari cloud, lalu dengarkan perubahan real-time (sinkron antar HP/browser)
+if(db){
+  authReadyPromise.then(isAuthed => {
+    if(!isAuthed) return;
+    db.ref('appPresets').once('value')
+      .then(snap => {
+        if(snap.exists()){
+          localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(snap.val()));
+        }
+        presetFirebaseReady = true;
+        renderPresetList();
+      })
+      .catch(e => console.error('Gagal ambil preset dari cloud, pakai data lokal:', e));
+
+    db.ref('appPresets').on('value', snap => {
+      if(!presetFirebaseReady) return; // hindari trigger ganda saat load pertama
+      localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(snap.exists() ? snap.val() : {}));
+      renderPresetList();
+    });
+  });
 }
 
-function unlockGen1Gen2(){
-  fxGen1Locked = false; fxGen1LockedPools = null; fxGen1LockedPosLabels = null; fxGen1LockedFP = '';
-  fxGen1SemiAutoLocked = false;
-  fxGen1AutoLocked = false;
-  renderGen1LockUI();
+// Ambil nilai semua kontrol saat ini sesuai daftar PRESET_FIELDS
+function presetCollectFields(){
+  const data = {};
+  PRESET_FIELDS.forEach(f=>{
+    if(f.type === 'radio'){
+      const checked = document.querySelector(`input[name="${f.name}"]:checked`);
+      data[f.id] = checked ? checked.value : null;
+      return;
+    }
+    const el = document.getElementById(f.id);
+    if(!el) return;
+    data[f.id] = (f.type === 'checkbox') ? el.checked : el.value;
+  });
+  return data;
+}
+
+// Terapkan nilai preset ke semua kontrol, sambil trigger event change/input
+// supaya listener yang sudah ada (render ulang, dsb) tetap jalan seperti biasa.
+function presetApplyFields(data){
+  if(!data) return;
+  PRESET_FIELDS.forEach(f=>{
+    if(!(f.id in data) || data[f.id] === null || data[f.id] === undefined) return;
+    if(f.type === 'radio'){
+      const target = document.querySelector(`input[name="${f.name}"][value="${data[f.id]}"]`);
+      if(target && !target.checked){
+        target.checked = true;
+        target.dispatchEvent(new Event('change', { bubbles:true }));
+      }
+      return;
+    }
+    const el = document.getElementById(f.id);
+    if(!el) return;
+    if(f.type === 'checkbox'){
+      if(el.checked !== data[f.id]){
+        el.checked = data[f.id];
+        el.dispatchEvent(new Event('change', { bubbles:true }));
+      }
+    } else {
+      el.value = data[f.id];
+      el.dispatchEvent(new Event('change', { bubbles:true }));
+      el.dispatchEvent(new Event('input',  { bubbles:true }));
+    }
+  });
+}
+
+// Ambil aturan Gen2 tiap slot (hanya slot yang sedang terkunci) untuk disimpan ke preset.
+// Yang disimpan snapshot LENGKAP struktur Formula X (Tren N, Control N, Out N, posisi ACKE
+// yang dipilih) — BUKAN angka mentahnya — karena angka mentah pasti berubah tiap ganti data/periode.
+function presetCollectGen2(){
+  const data = {};
   FX_GEN2_SLOTS.forEach(sl=>{
     const s = fxGen2State[sl];
-    s.locked = false; s.pools = null; s.posLabels = null; s.fp = ''; s.rule = null;
+    data[sl] = (s.locked && s.rule) ? {
+      trendN: s.rule.trendN, controlN: s.rule.controlN, outN: s.rule.outN
+    } : null;
+  });
+  return data;
+}
+
+// Terapkan aturan Gen2 dari preset (paten baru): buka kunci dulu, lalu hitung ulang pakai
+// Tren N/Control N/Out N yang tersimpan di preset untuk slot ini — peringkat terburuk yang
+// diambil otomatis mengikuti slotnya (2A=ke-1, 2B=ke-2, 2C=ke-3, lihat WORST_RANK_BY_SLOT) —
+// lalu kunci lagi. Kalau Data Historis sudah siap saat ini, langsung dihitung & dikunci;
+// kalau belum, aturan tetap disimpan (s.rule) dan otomatis diterapkan begitu Data Historis
+// selesai diproses (lewat fxAutoUnlockAll).
+function presetApplyGen2(data){
+  FX_GEN2_SLOTS.forEach(sl=>{
+    const s = fxGen2State[sl];
+    // 1) buka kunci dulu
+    s.locked=false; s.pools=null; s.posLabels=null; s.fp='';
+    const entry = data && data[sl];
+    if(entry){
+      // 2) set rule (Tren N/Control N/Out N seperti terakhir disimpan)
+      s.rule = { trendN: entry.trendN, controlN: entry.controlN, outN: entry.outN };
+      // 3) "hitung ulang" (murni, tanpa mengubah dropdown yang tampil) & 4) kunci lagi kalau berhasil
+      fxApplyGen2Rule(sl);
+    } else {
+      s.rule=null;
+    }
     renderGen2LockUI(sl);
   });
 }
 
-// ── Tombol NORMAL: reset ke default bawaan aplikasi + unlock Gen1/Gen2 + refresh (fungsi lama tombol Refresh) ──
-document.getElementById('modeNormalBtn').addEventListener('click', ()=>{
-  // Tampilkan overlay + kunci tombol mode DULU (sebelum kerja berat sinkron di bawah), supaya
-  // tidak bisa diklik pindah mode lagi selagi proses ini jalan — sama seperti jalur ganti
-  // pasaran di database.js. setTimeout kecil dipakai supaya browser sempat menggambar overlay-nya
-  // dulu sebelum resetAllSettings()+analyze() (yang sinkron/blocking) mulai jalan.
-  if(typeof showLoadingOverlay === 'function') showLoadingOverlay('Mengembalikan ke Mode Normal...');
-  setModeButtonsDisabled(true);
-  setTimeout(() => {
-    try{
-      setAppMode('normal'); // set dulu SEBELUM analyze(), supaya hook auto-pipeline di analyze() tidak ikut jalan
-      resetAllSettings(); // sudah termasuk unlockGen1Gen2() di dalamnya
-      analyze();
-      document.getElementById('modeFeedback').textContent = 'Mode Normal — semua pengaturan dikembalikan ke default.';
-    } finally {
-      if(typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
-      setModeButtonsDisabled(false);
-    }
-  }, 30);
-});
-
-// ── Alur pipeline otomatis penuh, dipakai Mode Auto & Semi Auto setelah preset aktif: ──
-// Formula X → card Auto Generator (AUTO GENERATE) → Kirim ke Filter → Jumlah & Selisih →
-// Ai Ai → Shi234 → Terapkan Filter. Setiap langkah memanggil persis fungsi/tombol yang sama
-// dengan yang dipakai manual, supaya perilakunya identik.
-//
-// Dipecah 2 bagian: bagian SETELAH Formula X (runAutoPipelineAfterFormulaX) dipisah supaya
-// bisa dipanggil ulang langsung dari analyze() setiap kali Periode/Data Historis berganti —
-// analyze() sudah menghitung Formula X sendiri di situ, jadi tidak perlu diulang.
-// Flag anti-tabrakan: cegah dua siklus pipeline (mis. dua analyze() beruntun saat data
-// masih menyusul dari Firebase) jalan bersamaan selagi salah satunya sedang menunggu
-// retry Gen 2 (fxEnsureGen2MatchesPreset pakai jeda async).
-let fxPipelineInFlight = false;
-
-async function runAutoPipelineAfterFormulaX(){
-  if(fxPipelineInFlight) return 'skipped';
-  fxPipelineInFlight = true;
-  try{
-  // 0) Mode Auto (bukan Semi Auto): kunci Gen 1 otomatis SESUAI PRESET (FX_SELECTED — bukan
-  // rank #1 lagi) SEBELUM langkah lain jalan. Semi Auto dilewati karena Gen 1-nya sudah dikunci
-  // manual dari Angka Bahan (fxGen1SemiAutoLocked) — tidak boleh ditimpa di sini.
-  //
-  // PENTING: analyze() SELALU parse ulang Data Historis (Default) tanpa peduli radio Sumber
-  // Data — jadi kalau radio lagi di "Data Terbaru", lastHistoryNumbers/FX_RECOMMENDATIONS di
-  // titik ini masih hasil Default. Panggil fxRefreshHistoryIfTerbaru() + computeFormulaX() dulu
-  // di sini supaya kalau radio memang "Data Terbaru", Gen 1 dikunci pakai data dari tabel
-  // Histori All Periode yang SEGAR — bukan diam-diam balik ke Data Historis tiap siklus auto.
-  //
-  // Tidak ada lagi cabang manual/auto di sini — fxAutoLockGen1FromPreset() sendiri yang
-  // menangani semuanya: unlock dulu kalau masih terkunci, pastikan datanya segar (retry kalau
-  // masih kebaca fingerprint lama), isi dari preset/FX_SELECTED, lalu lock lagi.
-  if(typeof getAppMode === 'function' && getAppMode() === 'auto'){
-    fxRefreshHistoryIfTerbaru();
-    if(lastHistoryNumbers.length && lastPosLabels) computeFormulaX(lastHistoryNumbers, lastPosLabels);
-    await fxAutoLockGen1FromPreset();
-  }
-
-  // Pastikan Gen 2 tersinkron ke Preset (retry sampai 3x) SEBELUM Auto Generate jalan.
-  // Kalau tetap gagal, HENTIKAN pipeline di sini — jangan lanjut dengan Gen2 live.
-  // Dropdown "Pilih Sumber GEN2" (#autoGen2SourceSelect): "manual" (default lama) -> jalur
-  // fxEnsureGen2MatchesPreset() SAMA PERSIS seperti sebelumnya, tidak diubah sama sekali.
-  // "auto" -> jalur BARU fxAutoLockGen2FromAutoPercent() (lihat definisinya di atas), terpisah
-  // total, tidak lewat fxApplyGen2Rule/computeFormulaXPure sama sekali.
-  const gen2SourceEl = document.getElementById('autoGen2SourceSelect');
-  const gen2Source = gen2SourceEl ? gen2SourceEl.value : 'manual';
-  const gen2Ok = (gen2Source === 'auto' && typeof fxAutoLockGen2FromAutoPercent === 'function')
-    ? fxAutoLockGen2FromAutoPercent()
-    : await fxEnsureGen2MatchesPreset(3, 300);
-  renderGen1LockUI();
-  FX_GEN2_SLOTS.forEach(renderGen2LockUI);
-
-  if(!gen2Ok){
-    const msg = gen2Source === 'auto'
-      ? 'Gen 2 (Auto%) gagal dihitung — data historis kemungkinan belum cukup/sinkron. Muat ulang halaman, lalu jalankan Mode Auto lagi.'
-      : 'Gen 2 gagal disesuaikan dengan Preset setelah 3x percobaan (data pasaran kemungkinan belum sinkron). Muat ulang halaman, lalu jalankan Mode Auto/Semi Auto lagi.';
-    document.getElementById('modeFeedback').textContent = msg;
-    alert(msg);
-    return 'gen2-failed';
-  }
-
-  // 2) Card Auto Generator → AUTO GENERATE
-  fxAutoGenerate();
-  if(!document.getElementById('fxAutoGenOut').value){
-    return false; // Formula X/Data belum siap — fxAutoGenerate sudah kasih alert sendiri
-  }
-
-  // 3) Kirim ke Filter — tombol ini HANYA mengganti sumber Filter (filterCustomSource) dengan
-  // hasil Auto Generator terbaru; sudah TIDAK mereset kriteria Filter Pangkas Kombinasi lagi.
-  document.getElementById('fxAutoGenToFilterBtn').click();
-
-  // Reset dulu SEMUA kriteria Filter Pangkas Kombinasi (checkbox & isian manual, termasuk
-  // twinMurniPick & .shioPick individual yang tidak ikut PRESET_FIELDS) ke kosong — supaya
-  // langkah-langkah pengisian di bawah (preset apply + tombol Cari) selalu mulai dari kondisi
-  // bersih, bukan menumpuk/tercampur sisa dari sesi/klik sebelumnya.
-  resetFilters();
-
-  // Timpa kriteria Filter Pangkas Kombinasi dari Preset Aktif SEKARANG (sebelum tombol Cari) —
-  // ini mengisi pengaturan yang TIDAK disentuh tombol Cari (mis. Tanpa Kembar, Buang yang Sudah
-  // Keluar, Angka Ikut manual, dsb). Field yang MEMANG diisi ulang oleh tombol Cari di bawah
-  // (filterJumlah/filterSelisih/filterAiAC/filterAiCK/filterCB/filterShioAll) akan ditimpa lagi
-  // setelah ini dengan angka segar dari periode terbaru — itu memang tujuannya.
-  const _activePresetName = getActivePresetName();
-  if(_activePresetName){
-    const _all = presetLoadAll();
-    if(_all[_activePresetName]) presetApplyFields(_all[_activePresetName].fields);
-  }
-
-  // 4) Jumlah & Selisih — cari rekomendasi cover data (langsung isi filterJumlah/filterSelisih
-  // dengan angka SEGAR dari periode terbaru, menimpa nilai preset di field ini)
-  document.getElementById('cariJumlahBtn').click();
-  document.getElementById('cariSelisihBtn').click();
-
-  // 5) Ai Ai — cari rekomendasi cover data tiap pasangan posisi (isi filterAiAC/filterAiCK/filterCB)
-  document.getElementById('cariAiACBtn').click();
-  document.getElementById('cariAiCKBtn').click();
-  document.getElementById('cariAiKEBtn').click();
-
-  // 6) Shi234 — cari rekomendasi shio cover data (centang ulang checkbox Shio & filterShioAll)
-  document.getElementById('cariShioBtn').click();
-
-  // 7) Terapkan Filter — final, memakai gabungan: pengaturan preset (yang tidak disentuh Cari)
-  // + angka segar hasil Cari (yang memang harus ikut periode terbaru)
-  document.getElementById('applyFilterBtn').click();
-
-  // 8) Pipeline auto/semi auto selesai — arahkan user ke tab Generator dan sorot tombol
-  // Salin (Filter Pangkas Kombinasi) sebagai hasil akhir yang siap disalin.
-  if(typeof window.goPage === 'function') window.goPage('generator');
-  else if(typeof window.gotoTab === 'function') window.gotoTab('generator', true);
-  const _copyBtn = document.getElementById('filterCopyBtn');
-  if(_copyBtn){
-    _copyBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    _copyBtn.classList.remove('autoPipelineHighlight');
-    void _copyBtn.offsetWidth; // reset animasi kalau sebelumnya masih jalan
-    _copyBtn.classList.add('autoPipelineHighlight');
-    setTimeout(() => _copyBtn.classList.remove('autoPipelineHighlight'), 3500);
-  }
-
-  return true;
-  } finally {
-    fxPipelineInFlight = false;
-  }
+// ── Pengaturan per-posisi & Generator yang TIDAK bisa ikut lewat PRESET_FIELDS (bukan kontrol
+// HTML statis dengan id/value tetap — FX_SELECTED & TOP_POSISI_SELECTED adalah state di memori,
+// sedangkan checkbox Twin Murni dibangun ULANG tiap analyze() jadi tidak selalu ada di DOM). ──
+function presetCollectExtra(){
+  return {
+    fxSelected: { ...FX_SELECTED },
+    topPosisiSelected: { ...TOP_POSISI_SELECTED },
+    twinPairs: (typeof getSelectedTwinMurniPairs === 'function') ? getSelectedTwinMurniPairs() : [],
+    shio: [...document.querySelectorAll('.shioPick:checked')].map(el => el.dataset.shio),
+    generator: { bulkOut: document.getElementById('bulkOut').value }
+  };
 }
 
-async function runAutoPipeline(){
-  if(!lastPosLabels || !lastPosLabels.length || !lastHistoryNumbers.length){
-    alert('Isi & proses Data Historis dulu (Periode) sebelum menjalankan pipeline otomatis.');
+// State "extra" milik preset yang SEDANG aktif dimuat — dipakai untuk dipasang ULANG tiap kali
+// Formula X selesai dihitung (lihat hook fxStatus di automode.js), karena FX_SELECTED ditimpa
+// otomatis ke rangking #1 dan checkbox Twin Murni dibangun ulang dari nol tiap computeFormulaX()/
+// analyze() — persis alasan yang sama kenapa Gen2 butuh presetApplyGen2/fxApplyGen2Rule.
+// Mode Normal (resetAllSettings) WAJIB mengosongkan ini supaya tidak diam-diam dipasang lagi.
+let presetPendingExtra = null;
+
+function presetApplyExtraNow(extra){
+  if(!extra) return;
+
+  // Generator: Kombinasi Acak manual/otomatis — aman dipasang kapan saja, tidak tergantung data.
+  if(extra.generator && extra.generator.bulkOut != null){
+    document.getElementById('bulkOut').value = extra.generator.bulkOut;
+  }
+
+  // Sisanya butuh Data Historis sudah diproses (posisi & Formula X sudah ada).
+  if(!lastPosLabels || !lastPosLabels.length) return;
+
+  // Formula X per posisi: timpa lagi rangking #1 bawaan computeFormulaX() dengan POSISI/URUTAN
+  // yang disimpan di preset (bukan nama formula lagi) — supaya preset ikut "radio ke berapa",
+  // konsisten walau nama/urutan formula di daftar rekomendasi berubah antar pasaran.
+  // DIKECUALIKAN kalau radio Formula X sedang TIDAK BOLEH ikut Preset — lihat
+  // fxSelectedFollowsPreset() di automode.js (Mode Normal, ATAU Mode Auto dengan Sumber GEN1 =
+  // Auto%) — supaya di kondisi itu, hasil computeFormulaX()/klik manual/Auto%/Posisi%/Gen1-Auto%
+  // TIDAK langsung ditarik balik ke pilihan Preset.
+  const skipFxSelectedFromPreset = (typeof fxSelectedFollowsPreset === 'function') && !fxSelectedFollowsPreset();
+  if(extra.fxSelected && FX_RECOMMENDATIONS && !skipFxSelectedFromPreset){
+    let changed = false;
+    lastPosLabels.forEach(label => {
+      const idx = extra.fxSelected[label];
+      const recs = FX_RECOMMENDATIONS[label] || [];
+      if(typeof idx === 'number' && recs[idx]){
+        FX_SELECTED[label] = idx;
+        FX_TOUCHED[label] = true;
+        changed = true;
+      }
+    });
+    if(changed){
+      renderFormulaX(lastPosLabels);
+      renderFxTrendNumbers(lastPosLabels, lastHistoryNumbers);
+      renderFxBacktestTable(lastPosLabels, lastHistoryNumbers);
+      if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
+      if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
+      if(typeof fxApplyToGenerator === 'function') fxApplyToGenerator(true);
+    }
+  }
+
+  // Top Posisi per posisi (Kuat/Sedang) — tidak ditimpa otomatis oleh computeFormulaX, jadi
+  // cukup di-set langsung lalu render ulang.
+  if(extra.topPosisiSelected){
+    TOP_POSISI_SELECTED = { ...extra.topPosisiSelected };
+    if(typeof renderTopPosisi === 'function') renderTopPosisi(lastPosLabels, lastHistoryNumbers);
+  }
+
+  // Twin Murni: checkbox-nya dibangun ulang tiap analyze(), jadi harus dicentang lagi di sini.
+  (extra.twinPairs || []).forEach(([i, j]) => {
+    const cb = document.querySelector(`.twinMurniPick[data-i="${i}"][data-j="${j}"]`);
+    if(cb) cb.checked = true;
+  });
+
+  // Shio pick individual (checkbox statis, tapi disatukan di sini biar konsisten dengan yang lain).
+  (extra.shio || []).forEach(s => {
+    const cb = document.querySelector(`.shioPick[data-shio="${s}"]`);
+    if(cb) cb.checked = true;
+  });
+  if(typeof updateShioPickNote === 'function') updateShioPickNote();
+}
+
+function presetSave(name){
+  if(!name) return false;
+  const all = presetLoadAll();
+  if(!(name in all) && Object.keys(all).length >= PRESET_MAX_COUNT){
+    alert(`Maksimal ${PRESET_MAX_COUNT} preset tersimpan. Hapus salah satu dulu sebelum menambah preset baru.`);
     return false;
   }
-  // 1) Formula X — hitung ulang sesuai Tren N/Control N/Out N yang baru dimuat dari preset.
-  computeFormulaX(lastHistoryNumbers, lastPosLabels);
-  return await runAutoPipelineAfterFormulaX();
+  all[name] = { savedAt: Date.now(), fields: presetCollectFields(), extra: presetCollectExtra(), gen2: presetCollectGen2() };
+  presetSaveAll(all);
+  return true;
+}
+function presetLoad(name, {refreshCoverData = true} = {}){
+  const all = presetLoadAll();
+  if(!all[name]) return false;
+  presetApplyFields(all[name].fields);
+  presetApplyGen2(all[name].gen2 || null);
+
+  // Simpan sebagai "aturan aktif" supaya dipasang ulang otomatis tiap Formula X selesai dihitung
+  // (lihat hook di automode.js), lalu langsung coba pasang sekarang juga kalau data sudah siap.
+  presetPendingExtra = all[name].extra || null;
+  presetApplyExtraNow(presetPendingExtra);
+
+  // Segarkan Cover Data (Jumlah&Selisih/Ai Ai/Shio 234) & Filter pakai Data Historis yang
+  // SEDANG aktif sekarang — supaya field-field itu tidak kebawa angka basi dari saat preset
+  // ini terakhir disimpan. Dilewati kalau refreshCoverData=false (dipakai Mode Auto/Semi Auto,
+  // yang sudah punya pipeline sendiri buat ini setelah Formula X dihitung ulang — lihat
+  // runAutoPipelineAfterFormulaX di automode.js — supaya tidak dobel klik Cari+Filter).
+  if(refreshCoverData && lastPosLabels && lastPosLabels.length && lastHistoryNumbers && lastHistoryNumbers.length){
+    document.getElementById('cariJumlahBtn').click();
+    document.getElementById('cariSelisihBtn').click();
+    document.getElementById('cariAiACBtn').click();
+    document.getElementById('cariAiCKBtn').click();
+    document.getElementById('cariAiKEBtn').click();
+    document.getElementById('cariShioBtn').click();
+    document.getElementById('applyFilterBtn').click();
+  }
+  return true;
+}
+function presetDelete(name){
+  const all = presetLoadAll();
+  delete all[name];
+  presetSaveAll(all);
 }
 
-// ── Pill AUTO: cuma pindah tampilan ke panel Pengaturan Auto — TIDAK langsung mengaktifkan
-// mode. Mode baru benar-benar commit saat tombol "Aktifkan Auto" ditekan (sama pola dengan
-// pill Semi Auto / tombol "Aktifkan Semi Auto"). ──
-document.getElementById('modeAutoBtn').addEventListener('click', ()=>{
-  showModeView('auto');
-  document.getElementById('autoSettingsFeedback').textContent = '';
-});
-
-// ── Pengaman: tombol "Aktifkan Auto" berubah jadi "Stop Auto" selama Mode Auto berjalan, dan
-// dropdown Preset/Sumber GEN1/Sumber GEN2 dikunci (disabled) supaya tidak diubah diam-diam
-// selagi pipeline auto sedang jalan — baru bisa diubah lagi setelah "Stop Auto" ditekan. ──
-function applyAutoUiRunningState(running){
-  const btn = document.getElementById('autoActivateBtn');
-  if(btn) btn.textContent = running ? '⏹ Stop Auto' : '⚡ Aktifkan Auto';
-  ['autoPresetSelect', 'autoGen1SourceSelect', 'autoGen2SourceSelect'].forEach(id => {
-    const el = document.getElementById(id);
-    if(el) el.disabled = running;
-  });
+const ACTIVE_PRESET_KEY = 'activePresetName_v1';
+function getActivePresetName(){ return localStorage.getItem(ACTIVE_PRESET_KEY) || ''; }
+function setActivePresetName(name){
+  if(name) localStorage.setItem(ACTIVE_PRESET_KEY, name);
+  else localStorage.removeItem(ACTIVE_PRESET_KEY);
 }
 
-// ── Tombol "Aktifkan Auto": validasi Preset (dropdown "Pilih Preset"), commit mode Auto,
-// lalu jalankan pipeline — persis logika lama yang dulu menempel di klik pill "Auto".
-// Begitu Mode Auto berjalan, tombol yang sama berfungsi sebagai "Stop Auto". ──
-document.getElementById('autoActivateBtn').addEventListener('click', ()=>{
-  const feedback = document.getElementById('autoSettingsFeedback');
+function renderPresetList(){
+  const all = presetLoadAll();
+  const names = Object.keys(all);
+  document.getElementById('presetCountBadge').textContent = names.length + '/' + PRESET_MAX_COUNT + ' preset';
 
-  // Mode Auto SEDANG berjalan -> tombol ini bertindak sebagai STOP: lepas kunci Gen1/Gen2 &
-  // kembalikan pengaturan ke default (proses internal SAMA seperti pill "Normal"), TAPI TANPA
-  // memindahkan tampilan ke panel Normal — tetap di panel Pengaturan Auto ini, supaya user bisa
-  // langsung pilih Preset/Sumber baru & tekan "Aktifkan Auto" lagi dari sini juga.
-  if(typeof getAppMode === 'function' && getAppMode() === 'auto'){
-    if(typeof showLoadingOverlay === 'function') showLoadingOverlay('Menghentikan Mode Auto...');
-    setModeButtonsDisabled(true);
-    setTimeout(() => {
-      try{
-        localStorage.setItem(APP_MODE_KEY, 'normal'); // ganti status internal SAJA, tanpa showModeView('normal')
-        resetAllSettings(); // termasuk unlockGen1Gen2() di dalamnya
-        analyze();
-        showModeView('auto'); // paksa tetap di panel Auto — juga otomatis mengembalikan tombol jadi "Aktifkan Auto" & dropdown aktif lagi
-        feedback.textContent = 'Mode Auto dihentikan — pengaturan dikembalikan ke default. Pilih Preset & Sumber lagi untuk mengaktifkan.';
-        document.getElementById('modeFeedback').textContent = feedback.textContent;
-      } finally {
-        if(typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
-        setModeButtonsDisabled(false);
-      }
-    }, 30);
-    return;
-  }
-
-  const name = getActivePresetName();
-  if(!name){ feedback.textContent = 'Pilih dulu "Pilih Preset" di atas.'; return; }
-  const ok = presetLoad(name, {refreshCoverData: false});
-  if(!ok){ feedback.textContent = `Preset "${name}" tidak ditemukan — pilih ulang Preset.`; return; }
-  setAppMode('auto');
-  applyAutoUiRunningState(true);
-
-  // Kalau pasaran/periode SUDAH kepilih dari sebelumnya (dropdown tidak akan trigger
-  // event "change" kalau tidak diganti), paksa reload+analyze() di sini juga — supaya
-  // pipeline otomatis (Formula X -> Generate -> Filter) tetap jalan pakai preset yang
-  // baru dimuat, bukan nyangkut di kondisi lama sebelum Mode Auto diaktifkan.
-  const kodeSudahDipilih = (typeof firebaseSelectedKode === 'function') ? firebaseSelectedKode() : '';
-  const pipelineLangsungJalan = kodeSudahDipilih && firebaseLoadSelectedData({auto:false});
-
-  const msg = pipelineLangsungJalan
-    ? `Mode Auto — preset "${name}" dimuat & pipeline otomatis sudah jalan untuk pasaran "${kodeSudahDipilih}". Ganti pasaran/periode kapan saja untuk menjalankan ulang.`
-    : `Mode Auto — preset "${name}" dimuat. Pilih pasaran/periode di bawah untuk menjalankan alur Formula X → Generate → Filter otomatis.`;
-  feedback.textContent = msg;
-  document.getElementById('modeFeedback').textContent = msg;
-
-  // Tetap arahkan ke pemilihan pasaran/periode di halaman Analisis — baik supaya user
-  // bisa langsung ganti periode (kalau pipeline sudah jalan), atau supaya user memilih
-  // pasaran untuk pertama kali (kalau belum ada yang kepilih sama sekali).
-  if(typeof window.goPage === 'function') window.goPage('analisis');
-  const periodeSel = document.getElementById('analisisPeriodeSelect');
-  if(periodeSel){
-    periodeSel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    periodeSel.classList.remove('autoPipelineHighlight');
-    void periodeSel.offsetWidth;
-    periodeSel.classList.add('autoPipelineHighlight');
-    setTimeout(() => periodeSel.classList.remove('autoPipelineHighlight'), 3500);
-  }
-});
-
-// ── Pill SEMI AUTO: cuma pindah tampilan ke panel Pengaturan Semi Auto — TIDAK langsung
-// mengaktifkan mode. Mode baru benar-benar commit saat tombol "Aktifkan Semi Auto" ditekan. ──
-document.getElementById('modeSemiAutoBtn').addEventListener('click', ()=>{
-  showModeView('semi');
-  document.getElementById('semiAutoFeedback').textContent = '';
-  const hint = document.getElementById('semiAutoModalHint');
-  hint.textContent = (lastPosLabels && lastPosLabels.length)
-    ? `Isi satu angka saja untuk mengisi semua posisi (${lastPosLabels.join(',')}), atau pisahkan tiap posisi dengan titik (.) atau koma (,) sesuai urutan: ${lastPosLabels.join(' → ')}.`
-    : 'Isi satu angka saja untuk mengisi semua posisi, atau pisahkan tiap posisi dengan titik (.) atau koma (,) sesuai urutan posisi aktif. (Proses Data Historis dulu supaya posisi terdeteksi.)';
-});
-
-// ── Tombol "Aktifkan Semi Auto": validasi Preset Aktif & Data Historis, kunci Gen 1 dari
-// Angka Bahan, baru commit mode Semi (fungsinya sama persis dengan tombol Save popup lama). ──
-document.getElementById('semiAutoActivateBtn').addEventListener('click', ()=>{
-  const feedback = document.getElementById('semiAutoFeedback');
-  const name = getActivePresetName();
-  if(!name){ feedback.textContent = 'Pilih dulu Preset Strategi.'; return; }
-  const ok = presetLoad(name, {refreshCoverData: false});
-  if(!ok){ feedback.textContent = `Preset "${name}" tidak ditemukan — pilih ulang Preset Strategi.`; return; }
-  if(!lastPosLabels || !lastPosLabels.length){
-    feedback.textContent = 'Isi & proses Data Historis dulu (posisi A/C/K/E belum terdeteksi).';
-    return;
-  }
-
-  const raw = document.getElementById('semiAutoInput').value.trim();
-  if(!raw){ feedback.textContent = 'Isi Angka Bahan Gen 1 dulu.'; return; }
-
-  const segments = raw.split(/[.,]/).map(s=>s.trim()).filter(s=>s.length);
-  const n = lastPosLabels.length;
-  let perPosition;
-
-  if(segments.length === 1){
-    // Satu baris angka saja → isi semua posisi dengan angka yang sama
-    perPosition = lastPosLabels.map(()=> segments[0]);
-  } else if(segments.length === n){
-    perPosition = segments;
+  // Isi ulang dropdown "Preset Aktif" (Semi Auto) & "Pilih Preset" (Auto) — sama-sama
+  // merujuk ke ACTIVE_PRESET_KEY yang sama, jadi selalu sinkron satu sama lain.
+  const sel = document.getElementById('activePresetSelect');
+  const autoSel = document.getElementById('autoPresetSelect');
+  const prevActive = getActivePresetName();
+  const optionsHtml = '<option value="">— Belum dipilih —</option>' +
+    names.map(n => `<option value="${n}">${n}</option>`).join('');
+  sel.innerHTML = optionsHtml;
+  if(autoSel) autoSel.innerHTML = optionsHtml;
+  if(names.includes(prevActive)){
+    sel.value = prevActive;
+    if(autoSel) autoSel.value = prevActive;
   } else {
-    feedback.textContent = `Jumlah segmen (${segments.length}) tidak sesuai jumlah posisi aktif (${n}: ${lastPosLabels.join(',')}). Isi 1 angka saja, atau tepat ${n} angka dipisah titik/koma.`;
-    return;
+    setActivePresetName('');
   }
 
-  if(perPosition.some(s => !/^\d+$/.test(s))){
-    feedback.textContent = 'Hanya boleh berisi angka 0-9 di tiap segmen.';
-    return;
-  }
-
-  const pools = perPosition.map(s => s.split(''));
-  fxGen1Locked = true;
-  fxGen1SemiAutoLocked = true;
-  fxGen1AutoLocked = false;
-  fxGen1LockedPools = pools;
-  fxGen1LockedPosLabels = lastPosLabels.slice();
-  fxGen1LockedFP = dataFingerprint(lastHistoryNumbers);
-  renderGen1LockUI();
-
-  setAppMode('semi');
-
-  // Sebelumnya titik ini SAMA SEKALI tidak ada loading overlay/pengunci tombol — beda dengan
-  // jalur ganti pasaran (firebaseLoadSelectedData di database.js) yang sudah pakai overlay.
-  // Akibatnya selama runAutoPipeline() jalan (bisa ~1 detik lebih karena retry Gen2 3x300ms),
-  // tombol Mode Normal/Auto masih bisa diklik bebas dan menabrak pipeline yang sedang berjalan.
-  // Overlay ditampilkan dulu + tombol mode dikunci SEBELUM runAutoPipeline() dipanggil (bukan
-  // di dalam .then()), supaya juga menutupi bagian kerja berat yang sinkron di awal pipeline.
-  if(typeof showLoadingOverlay === 'function') showLoadingOverlay('Menjalankan pipeline Semi Auto...');
-  setModeButtonsDisabled(true);
-
-  runAutoPipeline().then(pipelineOk => {
-    if(pipelineOk === 'gen2-failed'){
-      // Pesan reload sudah ditampilkan (alert + modeFeedback) di runAutoPipelineAfterFormulaX —
-      // jangan ditimpa di sini.
-      feedback.textContent = 'Mode Semi Auto aktif — Gen 1 terkunci, tapi Gen 2 gagal disesuaikan Preset. Lihat notifikasi.';
-      return;
-    }
-    feedback.textContent = pipelineOk
-      ? 'Mode Semi Auto aktif — Gen 1 terkunci dari Angka Bahan, alur Formula X → Generate → Filter selesai otomatis.'
-      : 'Mode Semi Auto aktif — Gen 1 terkunci dari Angka Bahan, tapi alur otomatis belum jalan (cek Data Historis).';
-    document.getElementById('modeFeedback').textContent = feedback.textContent;
-  }).finally(() => {
-    if(typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
-    setModeButtonsDisabled(false);
+  const wrap = document.getElementById('presetList');
+  const empty = document.getElementById('presetEmptyNote');
+  wrap.innerHTML = '';
+  if(!names.length){ empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  names.forEach(name=>{
+    const item = document.createElement('div');
+    item.className = 'saveditem';
+    const savedDate = new Date(all[name].savedAt).toLocaleString('id-ID');
+    item.innerHTML = `
+      <div class="info">
+        <div class="name"></div>
+        <div class="meta"></div>
+      </div>
+      <div class="actions">
+        <button class="load">Muat</button>
+        <button class="del">Hapus</button>
+      </div>`;
+    item.querySelector('.name').textContent = name;
+    item.querySelector('.meta').textContent = savedDate;
+    item.querySelector('.load').addEventListener('click', ()=>{
+      presetLoad(name);
+      document.getElementById('presetFeedback').textContent = `Preset "${name}" dimuat — semua filter sudah terisi.`;
+    });
+    item.querySelector('.del').addEventListener('click', ()=>{
+      if(!confirm(`Hapus preset "${name}"?`)) return;
+      presetDelete(name);
+      document.getElementById('presetFeedback').textContent = `Preset "${name}" dihapus.`;
+      renderPresetList();
+    });
+    wrap.appendChild(item);
   });
+}
+
+document.getElementById('activePresetSelect').addEventListener('change', (e)=>{
+  setActivePresetName(e.target.value);
+  document.getElementById('presetFeedback').textContent = e.target.value
+    ? `Preset aktif diset ke "${e.target.value}".`
+    : 'Preset aktif dikosongkan.';
+  const autoSel = document.getElementById('autoPresetSelect');
+  if(autoSel) autoSel.value = e.target.value;
 });
 
-// Terapkan mode tersimpan (kalau ada) saat halaman dibuka, tanpa menjalankan ulang popup/preset.
-setAppMode(getAppMode());
-
-// ── Tombol Mode Analisa di halaman Beranda: teruskan ke tombol asli di halaman Analisis ──
-// (bukan logika baru — supaya validasi Preset Aktif/Data Historis & popup Semi Auto tetap
-// satu sumber kebenaran, tidak dobel dan tidak bisa beda perilaku antara Beranda & Analisis)
-document.getElementById('modeNormalBtnHome').addEventListener('click', ()=>{
-  document.getElementById('modeNormalBtn').click();
-});
-document.getElementById('modeSemiAutoBtnHome').addEventListener('click', ()=>{
-  document.getElementById('modeSemiAutoBtn').click();
-  if(typeof window.goPage === 'function') window.goPage('analisis');
-});
-document.getElementById('modeAutoBtnHome').addEventListener('click', ()=>{
-  document.getElementById('modeAutoBtn').click();
-  if(typeof window.goPage === 'function') window.goPage('analisis');
+// Dropdown "Pilih Preset" di panel Pengaturan Auto — sama-sama menyetel ACTIVE_PRESET_KEY,
+// disinkronkan balik ke dropdown "Preset Aktif" (Semi Auto) supaya tidak pernah beda nilai.
+document.getElementById('autoPresetSelect').addEventListener('change', (e)=>{
+  setActivePresetName(e.target.value);
+  const semiSel = document.getElementById('activePresetSelect');
+  if(semiSel) semiSel.value = e.target.value;
+  document.getElementById('autoSettingsFeedback').textContent = e.target.value
+    ? `Preset diset ke "${e.target.value}".`
+    : 'Preset dikosongkan.';
 });
 
+document.getElementById('presetSaveBtn').addEventListener('click', ()=>{
+  const nameInput = document.getElementById('presetNameInput');
+  const name = nameInput.value.trim();
+  if(!name){ alert('Isi nama preset dulu, mis. "KR Standar".'); return; }
+  const ok = presetSave(name);
+  if(!ok) return;
+  nameInput.value = '';
+  document.getElementById('presetFeedback').textContent = `Preset "${name}" tersimpan.`;
+  renderPresetList();
+});
+
+renderPresetList();
+
+// ===================== TOMBOL FLOATING: KEMBALI KE ATAS =====================
+(function(){
+  const btn = document.getElementById('scrollTopBtn');
+  if(!btn) return;
+  const SHOW_AFTER_PX = 300; // muncul setelah scroll turun sejauh ini
+  window.addEventListener('scroll', () => {
+    btn.classList.toggle('show', window.scrollY > SHOW_AFTER_PX);
+  }, { passive:true });
+  btn.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+})();
+
+// ===================== BOTTOM NAV + HALAMAN PENUH (Beranda/Analisis/Generator/Rekap) =====================
+(function(){
+  const body = document.body;
+  if('scrollRestoration' in history){
+    // Matikan restorasi scroll otomatis bawaan browser — supaya saat
+    // history.back() dipanggil (tombol Kembali / back HP), browser tidak
+    // ikut memaksa scroll ke posisi lama (biasanya ke atas).
+    history.scrollRestoration = 'manual';
+  }
+  const navBtns = Array.from(document.querySelectorAll('.bottomnav .navBtn'));
+  const chevRows = Array.from(document.querySelectorAll('#analisisMenu .chevRow'));
+  const backBtn = document.getElementById('subpageBackBtn');
+  const subTitleEl = document.getElementById('subpageTitle');
+  const oldTabButtons = Array.from(document.querySelectorAll('#navTabs .tabbtn'));
+  let subpageHistoryPushed = false;
+
+  function closeSubpage(){
+    delete body.dataset.subpageOpen;
+    subpageHistoryPushed = false;
+    const floatBtn = document.getElementById('subpageFloatBackBtn');
+    if(floatBtn) floatBtn.classList.remove('show');
+    // Sengaja tidak scroll ke atas — biarkan posisi scroll seperti semula
+    // supaya user tidak "terlempar" ke atas halaman saat menekan Kembali.
+  }
+
+  const titleByTab = {
+    formulax: 'Formula X',
+    jumlahselisih: 'Jumlah & Selisih',
+    angkaikut: 'Ai Ai',
+    shio234: 'Shio 234'
+  };
+
+  function setNavActive(page){
+    navBtns.forEach(b => b.classList.toggle('active', b.dataset.page === page));
+  }
+
+  function goPage(page){
+    body.dataset.page = page;
+    delete body.dataset.subpageOpen; // selalu mulai dari menu/awal halaman itu
+    setNavActive(page);
+    if(page === 'generator' || page === 'rekap'){
+      const btn = oldTabButtons.find(b => b.dataset.tab === page);
+      if(btn) btn.click(); // pastikan tabpanel-nya diberi class active oleh sistem tab lama
+    }
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  navBtns.forEach(b => b.addEventListener('click', () => goPage(b.dataset.page)));
+  window.goPage = goPage;
+
+  chevRows.forEach(row => {
+    row.addEventListener('click', () => {
+      const target = row.dataset.target;
+      const btn = oldTabButtons.find(b => b.dataset.tab === target);
+      if(btn) btn.click(); // reuse sistem tab lama supaya panel yang benar jadi .active
+      body.dataset.subpageOpen = '1';
+      if(subTitleEl) subTitleEl.textContent = titleByTab[target] || '';
+      history.pushState({ subpageOpen: true, tab: target }, '', location.href);
+      subpageHistoryPushed = true;
+      // Arahkan pandangan ke konten yang baru dibuka (header sub-halaman + isinya),
+      // BUKAN ke paling atas halaman Analisis (yang isinya kartu Mode Analisa dkk).
+      const header = document.getElementById('subpageHeader');
+      if(header) header.scrollIntoView({ behavior: 'auto', block: 'start' });
+    });
+  });
+
+  function goBackFromSubpage(){
+    if(subpageHistoryPushed){
+      history.back(); // akan memicu popstate → closeSubpage()
+    } else {
+      closeSubpage();
+    }
+  }
+
+  if(backBtn){
+    backBtn.addEventListener('click', goBackFromSubpage);
+  }
+
+  // Tombol Kembali floating: muncul kalau sedang di subpage Analisis DAN
+  // sudah discroll ke bawah melewati batas tertentu (tombol Kembali di header
+  // sudah tidak kelihatan lagi), supaya user tak perlu scroll balik ke atas dulu.
+  const floatBackBtn = document.getElementById('subpageFloatBackBtn');
+  if(floatBackBtn){
+    const FLOAT_BACK_SHOW_AFTER_PX = 160;
+    window.addEventListener('scroll', () => {
+      const active = body.dataset.page === 'analisis' && body.dataset.subpageOpen === '1';
+      floatBackBtn.classList.toggle('show', active && window.scrollY > FLOAT_BACK_SHOW_AFTER_PX);
+    }, { passive: true });
+    floatBackBtn.addEventListener('click', goBackFromSubpage);
+  }
+
+  // Tangkap tombol back bawaan HP/browser: kalau subpage Analisis (Formula X,
+  // Jumlah & Selisih, Ai Ai, Shio234) sedang terbuka, tutup subpage-nya saja
+  // dan tetap di situs — jangan sampai keluar/mundur dari halaman web.
+  window.addEventListener('popstate', () => {
+    if(body.dataset.subpageOpen){
+      closeSubpage();
+    }
+  });
+
+  // Cerminkan status "belum siap" (data-locked) dari tombol tab lama ke baris chevron baru
+  function refreshChevLocks(){
+    chevRows.forEach(row => {
+      const btn = oldTabButtons.find(b => b.dataset.tab === row.dataset.target);
+      if(!btn) return;
+      row.toggleAttribute('data-locked', btn.hasAttribute('data-locked'));
+    });
+  }
+  refreshChevLocks();
+  new MutationObserver(refreshChevLocks).observe(
+    document.getElementById('navTabs') || document.body,
+    { attributes: true, attributeFilter: ['data-locked'], subtree: true }
+  );
+
+  setNavActive('beranda'); // state awal: Beranda aktif
+})();
+
+// ===================== BERANDA: akordeon Data Historis + tap Top Candidate -> Formula X =====================
+(function(){
+  const accordion = document.getElementById('dataAccordion');
+  const header = document.getElementById('dataAccordionHeader');
+  if(accordion && header){
+    header.addEventListener('click', () => accordion.classList.toggle('open'));
+  }
+
+  const topArrow = document.getElementById('topCandidateArrow');
+  if(topArrow){
+    topArrow.addEventListener('click', () => {
+      // Pindah ke halaman Analisis lalu buka langsung sub-halaman Formula X
+      const bottomBtn = document.querySelector('.bottomnav .navBtn[data-page="analisis"]');
+      if(bottomBtn) bottomBtn.click();
+      const chevRow = document.querySelector('#analisisMenu .chevRow[data-target="formulax"]');
+      if(chevRow) chevRow.click();
+    });
+  }
+})();
