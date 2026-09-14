@@ -166,6 +166,7 @@
           <h2 style="margin:0;">Mode Normal <span class="pill pill-mode-normal">STABIL</span></h2>
           <p class="hint" style="margin:2px 0 0;">Analisa manual dengan kontrol penuh</p>
         </div>
+        <button type="button" id="stopAutoFromNormalBtn" class="btn" style="display:none; flex:0 0 auto; align-self:flex-start; margin-left:auto; white-space:nowrap; font-size:11.5px; padding:8px 10px; border-radius:10px; border:1px solid var(--rose); color:var(--rose); background:transparent;">⏹ Auto Aktif</button>
       </div>
       <ul class="checkList">
         <li>✅ Semua fitur analisa tersedia</li>
@@ -189,6 +190,7 @@
         <li>✅ Filter &amp; parameter otomatis</li>
         <li>✅ Cocok untuk efisiensi dan akurasi</li>
       </ul>
+      <div class="statusBox" id="modeInfoSemiStatus" style="display:none;"></div>
     </div>
 
     <label style="display:block; font-size:11px; color:var(--ink-dim); margin:16px 2px 6px; text-transform:uppercase; letter-spacing:.06em;">Periode</label>
@@ -226,6 +228,7 @@
         <li>✅ Monitoring real-time</li>
         <li>✅ Notifikasi hasil &amp; status</li>
       </ul>
+      <div class="statusBox" id="modeInfoAutoStatus" style="display:none;"></div>
     </div>
 
     <div class="card" id="autoSettingsPanel" style="display:none;">
@@ -978,6 +981,291 @@
 <script src="automode.js"></script>
 <script src="rekap.js"></script>
 <script src="main.js"></script>
+<script>
+// ===================== STATUS PENGATURAN AKTIF (Semi Auto / Auto) =====================
+// Menampilkan ringkasan pengaturan yang SEDANG aktif di card "Mode Semi Auto" / "Mode Auto"
+// (halaman Analisis), menggantikan sementara checklist bawaan (✅ ...) HANYA selama mode itu
+// benar-benar berjalan (getAppMode()) — checklist aslinya tetap ada di HTML, tidak dihapus,
+// dan tampil lagi otomatis begitu Mode Auto/Semi Auto tidak aktif (kembali ke Mode Normal).
+//
+// Diletakkan PALING TERAKHIR (setelah database.js/formula.js/generator.js/automode.js/rekap.js/
+// main.js) supaya semua state (FX_RECOMMENDATIONS, fxGen2State, lastPosLabels, dst) sudah ada.
+// Semua akses ke fungsi/variabel dari file lain dijaga pakai `typeof ... !== 'undefined'`
+// karena showModeView() (automode.js) sempat dipanggil sekali di awal load SEBELUM blok ini
+// sendiri selesai dieksekusi.
+
+function statusEscape(str){
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function statusSelectTxt(id, fallback){
+  const el = document.getElementById(id);
+  if(!el) return fallback;
+  return el.value === 'all' ? 'semua' : el.value;
+}
+
+// Baris satu posisi, mis. "A: BHG A 60%" (sep bisa diganti "|" biar mepet)
+function statusPosLine(posLabel, rec, sep){
+  sep = sep || ' ';
+  if(!rec) return `${posLabel}:${sep}-`;
+  const pct = (typeof rec.pct === 'number') ? Math.round(rec.pct) : rec.pct;
+  return `${posLabel}:${sep}${rec.label}${sep}${rec.source}${sep}${pct}%`;
+}
+
+// 2 kolom x N baris dari daftar posisi (A/C/K/E)
+// extraClass: class tambahan pada tiap .statusCell (mis. "stGen1Cell" utk area lingkaran merah)
+// sep: separator antar kata dalam baris (default spasi, "|" utk mepet)
+function statusGrid(posLabels, recByLabel, extraClass, sep){
+  const cls = 'statusCell' + (extraClass ? ' ' + extraClass : '');
+  const cells = posLabels.map(l => `<div class="${cls}">${statusEscape(statusPosLine(l, recByLabel[l], sep))}</div>`);
+  let html = '';
+  for(let i = 0; i < cells.length; i += 2){
+    html += `<div class="statusGrid2col">${cells[i] || ''}${cells[i + 1] || ''}</div>`;
+  }
+  return html;
+}
+
+// Rec (formula terpilih) untuk 1 posisi Gen 1
+function statusGen1RecFor(posLabel){
+  const recs = (typeof FX_RECOMMENDATIONS !== 'undefined' && FX_RECOMMENDATIONS) ? FX_RECOMMENDATIONS[posLabel] : null;
+  if(!recs || !recs.length) return null;
+  const idx = (typeof FX_SELECTED !== 'undefined') ? FX_SELECTED[posLabel] : undefined;
+  return (typeof idx === 'number' && recs[idx]) ? recs[idx] : recs[0];
+}
+
+// Ambil data mentah slot Gen 2 (tanpa render HTML) — dipakai buildActiveSettingsStatusHTML
+function statusGen2SlotData(slot){
+  const s = (typeof fxGen2State !== 'undefined') ? fxGen2State[slot] : null;
+  if(!s || !s.locked || !s.rule || !s.posLabels || !s.posLabels.length) return null;
+  const r = s.rule;
+  const trendTxt = r.trendN === 'all' ? 'semua' : r.trendN;
+  const controlTxt = r.controlN === 'all' ? 'semua' : r.controlN;
+  let recByLabel = {};
+  if(typeof computeFormulaXPure === 'function' && typeof lastHistoryNumbers !== 'undefined' && lastHistoryNumbers.length){
+    try{
+      const { recs } = computeFormulaXPure(lastHistoryNumbers, s.posLabels, r.trendN, r.controlN, r.outN);
+      const lockedPosition = (typeof fxFindGen2LockedPosition === 'function') ? fxFindGen2LockedPosition(s.posLabels, recs) : null;
+      s.posLabels.forEach(l => {
+        const list = recs[l] || [];
+        recByLabel[l] = (typeof fxPickGen2Rec === 'function') ? fxPickGen2Rec(slot, l, list, lockedPosition) : (list[0] || null);
+      });
+    }catch(e){}
+  }
+  return { trendTxt, controlTxt, outN: r.outN, posLabels: s.posLabels, recByLabel };
+}
+
+// "Filter yang di pilih" — data mentah tiap filter
+function statusFilterAiData(){
+  const tabel = document.getElementById('aiRowsShown')?.value || '-';
+  const out = (typeof getAiDigitCount === 'function') ? getAiDigitCount() : (document.getElementById('aiDigitCount')?.value || '-');
+  return { tabel, out };
+}
+function statusFilterShioData(){
+  const tabel = document.getElementById('shioRowsShown')?.value || '-';
+  const out = document.getElementById('shioPickCount')?.value || '-';
+  return { tabel, out };
+}
+function statusFilterSelisihJumlahData(){
+  const tabel = document.getElementById('jsRowsShown')?.value || '-';
+  const outSelisih = document.getElementById('jsRecoCountSelisih')?.value || '-';
+  const outJumlah = document.getElementById('jsRecoCountJumlah')?.value || '-';
+  return { tabel, outSelisih, outJumlah };
+}
+function statusTwinParts(){
+  const parts = [];
+  if(document.getElementById('filterExcludeHistory')?.checked) parts.push('angka keluar');
+  if(document.getElementById('filterHapus34')?.checked) parts.push('hapus 3-4');
+  if(document.getElementById('twinModeExclude')?.checked) parts.push('hapus twin');
+  const twinMurniPairs = (typeof getSelectedTwinMurniPairs === 'function') ? getSelectedTwinMurniPairs() : [];
+  twinMurniPairs.forEach(([i, j]) => {
+    const key = `${i}-${j}`;
+    parts.push((typeof TWIN_MURNI_LABELS_4D !== 'undefined' && TWIN_MURNI_LABELS_4D[key]) ? TWIN_MURNI_LABELS_4D[key] : `D${i+1}&D${j+1}`);
+  });
+  return parts;
+}
+function statusFilterTambahanParts(){
+  const parts = [];
+  if(document.getElementById('filterShortAC')?.checked) parts.push('Short AC');
+  if(document.getElementById('filterShortCK')?.checked) parts.push('Short CK');
+  if(document.getElementById('filterShortKE')?.checked) parts.push('Short KE');
+  if(document.getElementById('filterNoTwin')?.checked) parts.push('Tanpa kembar');
+  return parts;
+}
+
+// Label "Basis data"
+function statusBasisDataLabel(){
+  if(typeof rekapCurrentMarketLabel === 'function') return rekapCurrentMarketLabel();
+  const el = document.getElementById('filterLoadedName');
+  const txt = (el?.textContent || '').trim();
+  return (txt && txt !== '–' && txt !== '-') ? txt : '-';
+}
+
+// ── Layout 2 kolom: kiri = Gen1 + Gen2a, kanan = Gen2b header + Gen2c header ──
+// Format mengikuti contoh:
+//   Basis data: SG-447
+//   Pengaturan Aktif     Formula X
+//   Gen 1          [kiri]   Gen2b Out: X  [kanan]
+//   Tren:X Cntrl:X Out:X    #detail
+//   #posisi grid             Gen2c Out: X
+//   Gen2a Out: X             #detail
+//   #posisi grid
+//   Filter yang di pilih
+//   Ai (Tabel:X Out:X)     Shio (Tabel:X Out:X)
+//   Selisih & Jumlah       Twin
+//   Tabel:X                tabel:X Out:X
+//   Selisih|Out:X|         Hapustwin/detail
+//   Jumlah |Out:X|
+//   Filter Tambahan: ...
+function buildActiveSettingsStatusHTML(){
+  // ── Basis data & header ──
+  const basisData = statusEscape(statusBasisDataLabel());
+
+  // ── Gen 1 ──
+  let gen1TrendTxt = '-', gen1CtrlTxt = '-', gen1OutTxt = '-';
+  let gen1Grid = '';
+  if(typeof lastPosLabels !== 'undefined' && lastPosLabels && lastPosLabels.length){
+    gen1TrendTxt = statusSelectTxt('fxTrendN', '-');
+    gen1CtrlTxt  = statusSelectTxt('fxControlN', '-');
+    const outEl  = document.getElementById('fxOutN');
+    gen1OutTxt   = outEl ? outEl.value : (typeof FX_OUT_N !== 'undefined' ? FX_OUT_N : '-');
+    const recByLabel = {};
+    lastPosLabels.forEach(l => { recByLabel[l] = statusGen1RecFor(l); });
+    gen1Grid = statusGrid(lastPosLabels, recByLabel, 'stCompactCell', '|');
+  } else {
+    gen1Grid = '<div class="statusLine" style="font-size:10px;">Data belum diproses</div>';
+  }
+
+  // ── Gen 2 A / B / C ──
+  const slots = (typeof FX_GEN2_SLOTS !== 'undefined') ? FX_GEN2_SLOTS : ['A','B','C'];
+  const g2a = statusGen2SlotData(slots[0] || 'A');
+  const g2b = statusGen2SlotData(slots[1] || 'B');
+  const g2c = statusGen2SlotData(slots[2] || 'C');
+
+  function g2Header(label, d){
+    if(!d) return `<span class="st2dim">${statusEscape(label)} — belum terkunci</span>`;
+    return `<span class="st2label">${statusEscape(label)}</span> <span class="st2kv">Out&nbsp;:&nbsp;${statusEscape(d.outN)}</span>`;
+  }
+  function g2Detail(d){
+    if(!d) return '';
+    return `<div class="st2row">Tren&nbsp;:&nbsp;${statusEscape(d.trendTxt)}&nbsp;&nbsp;Cntrl&nbsp;:&nbsp;${statusEscape(d.controlTxt)}</div>`
+         + statusGrid(d.posLabels, d.recByLabel, 'stCompactCell', '|');
+  }
+
+  // ── Filter ──
+  const ai   = statusFilterAiData();
+  const shio = statusFilterShioData();
+  const sj   = statusFilterSelisihJumlahData();
+  const twinP  = statusTwinParts();
+  const tambP  = statusFilterTambahanParts();
+
+  const twinLabel = twinP.length ? twinP.join(' | ') : '-';
+  const tambLabel = tambP.length ? tambP.join(' | ') : '-';
+
+  return `
+<div class="stBox">
+  <div class="stBasisRow">
+    <span class="stBasisKey">Basis data:</span>
+    <span class="stBasisVal">${basisData}</span>
+  </div>
+
+  <div class="stMainGrid">
+    <!-- KOLOM KIRI -->
+    <div class="stCol stColL">
+      <div class="stSecHead">Pengaturan Aktif</div>
+
+      <div class="stGenHead">
+        <span class="st2label">Gen 1</span>
+        <span class="st2kv">Out&nbsp;:&nbsp;${statusEscape(gen1OutTxt)}</span>
+      </div>
+      <div class="st2row">Tren&nbsp;:&nbsp;${statusEscape(gen1TrendTxt)}&nbsp;&nbsp;Cntrl&nbsp;:&nbsp;${statusEscape(gen1CtrlTxt)}</div>
+      ${gen1Grid}
+
+      <div class="stGenHead" style="margin-top:6px;">
+        ${g2Header('Gen 2a', g2a)}
+      </div>
+      ${g2Detail(g2a)}
+    </div>
+
+    <!-- KOLOM KANAN -->
+    <div class="stCol stColR">
+      <div class="stSecHead">Formula X</div>
+
+      <div class="stGenHead">
+        ${g2Header('Gen 2b', g2b)}
+      </div>
+      ${g2Detail(g2b)}
+
+      <div class="stGenHead" style="margin-top:6px;">
+        ${g2Header('Gen 2c', g2c)}
+      </div>
+      ${g2Detail(g2c)}
+    </div>
+  </div>
+
+  <!-- FILTER yang di pilih -->
+  <div class="stFilterHead">Filter yang di pilih</div>
+  <div class="stFiltGrid">
+    <!-- kiri: Ai -->
+    <div class="stFiltCol">
+      <div class="stFiltLabel">Ai <span class="stFiltSub">(Tabel&nbsp;:&nbsp;${statusEscape(ai.tabel)}&nbsp;&nbsp;Out&nbsp;:&nbsp;${statusEscape(ai.out)})</span></div>
+      <div class="stFiltSubSection">
+        <div class="stFiltLine">Selisih &amp; jumlah</div>
+        <div class="stFiltLine">Tabel&nbsp;:&nbsp;${statusEscape(sj.tabel)}</div>
+        <div class="stFiltLine">Selisih&nbsp;|Out&nbsp;:&nbsp;${statusEscape(sj.outSelisih)}|</div>
+        <div class="stFiltLine">Jumlah&nbsp;&nbsp;|Out&nbsp;:&nbsp;${statusEscape(sj.outJumlah)}|</div>
+      </div>
+    </div>
+    <!-- kanan: Shio + Twin -->
+    <div class="stFiltCol">
+      <div class="stFiltLabel">Shio</div>
+      <div class="stFiltLine">tabel&nbsp;:&nbsp;${statusEscape(shio.tabel)}&nbsp;&nbsp;Out&nbsp;:&nbsp;${statusEscape(shio.out)}</div>
+      <div class="stFiltSubSection" style="margin-top:4px;">
+        <div class="stFiltLine">Twin</div>
+        <div class="stFiltLine">${statusEscape(twinLabel)}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stTambahan">Filter Tambahan</div>
+  <div class="stTambahanVal">${statusEscape(tambLabel)}</div>
+</div>
+  `;
+}
+// Dijaga sendiri (bukan langsung FX_GEN2_SLOTS) supaya tetap aman kalau blok ini pernah
+// dieksekusi sebelum automode.js selesai — fallback ke urutan default A/B/C.
+const FX_GEN2_SLOTS_STATUS = (typeof FX_GEN2_SLOTS !== 'undefined') ? FX_GEN2_SLOTS : ['A', 'B', 'C'];
+
+// Tampilkan status di card Mode Semi Auto ('modeInfoSemiStatus') / Mode Auto ('modeInfoAutoStatus')
+// HANYA kalau mode itu SEDANG BENAR-BENAR BERJALAN (getAppMode()) — bukan cuma sedang dilihat
+// panelnya. Kalau tidak aktif, checklist bawaan (✅ ...) yang tetap tampil, tidak dihapus.
+function renderModeStatusPanels(){
+  if(typeof getAppMode !== 'function') return;
+  const mode = getAppMode();
+
+  const semiChecklist = document.querySelector('#modeInfoSemi .checkList');
+  const semiStatus = document.getElementById('modeInfoSemiStatus');
+  if(semiChecklist && semiStatus){
+    const active = (mode === 'semi');
+    semiChecklist.style.display = active ? 'none' : '';
+    semiStatus.style.display = active ? '' : 'none';
+    if(active) semiStatus.innerHTML = buildActiveSettingsStatusHTML();
+  }
+
+  const autoChecklist = document.querySelector('#modeInfoAuto .checkList');
+  const autoStatus = document.getElementById('modeInfoAutoStatus');
+  if(autoChecklist && autoStatus){
+    const active = (mode === 'auto');
+    autoChecklist.style.display = active ? 'none' : '';
+    autoStatus.style.display = active ? '' : 'none';
+    if(active) autoStatus.innerHTML = buildActiveSettingsStatusHTML();
+  }
+}
+
+// Blok ini diletakkan paling akhir — panggil sekali sekarang supaya status langsung benar
+// begitu halaman dibuka (showModeView() sebelumnya sempat berjalan tanpa fungsi ini tersedia).
+renderModeStatusPanels();
+</script>
 
 </body>
 </html>
