@@ -344,15 +344,24 @@ function fxSearchBestN(used, posLabels, scoreFn){
 // dan TIDAK PERNAH menyentuh dropdown Kontrol N/Tren N/Out N atau radio Formula X yang tampil
 // di layar — murni dihitung diam-diam pakai FX_OUT_N yang sedang aktif sekarang sebagai acuan
 // ranking (sama seperti fxSearchBestN yang juga tidak pernah mengubah Out N).
+//
+// CUKUP WILSON SAJA (tidak ada tahap Posisi%/kombinasi gabungan lagi) — satu kriteria dipakai
+// untuk dua hal: (1) cari Control N/Tren N, (2) ranking formula per posisi (independen per
+// posisi, lihat fxRankWorstWilsonPerPosition di bawah).
+//
+// Kandidat N DIBATASI khusus untuk Gen2 Auto% ini saja: hanya yang < 60 (60 ke atas TIDAK
+// dipakai) — dipisah dari FX_N_CANDIDATES aslinya (dipakai apa adanya oleh Gen1/tombol Formula X,
+// tidak ikut dibatasi).
+const FX_N_CANDIDATES_GEN2_WORST = FX_N_CANDIDATES.filter(n => n < 60);
 
 // Wilson dibalik: skor per posisi diambil dari formula PALING RENDAH (bukan paling tinggi),
 // lalu pasangan Control N/Tren N yang dipilih adalah yang skor rata-ratanya PALING RENDAH.
 function fxSearchWorstN(used, posLabels){
   const chronoNum = used.slice().reverse();
   let worst = null;
-  FX_N_CANDIDATES.forEach(controlN => {
+  FX_N_CANDIDATES_GEN2_WORST.forEach(controlN => {
     const formulas = fxBuildFormulaList(posLabels, controlN);
-    FX_N_CANDIDATES.forEach(trendN => {
+    FX_N_CANDIDATES_GEN2_WORST.forEach(trendN => {
       let sumScore = 0, posCounted = 0;
       posLabels.forEach((label, idx) => {
         let worstScore = Infinity;
@@ -374,45 +383,37 @@ function fxSearchWorstN(used, posLabels){
   return worst;
 }
 
-// Posisi% dibalik: kandidat per posisi diambil dari BOTTOM-6 (akurasi individual PALING
-// RENDAH, bukan top-6), lalu SEMUA kombinasi lintas posisi dihitung Akurasi Keseluruhan-nya,
-// diurutkan dari yang PALING RENDAH, dan `count` kombinasi TERENDAH dikembalikan sekaligus
-// (bukan cuma satu) — supaya Gen2A/2B/2C bisa diisi peringkat terendah ke-1/2/3 dari SATU KALI
-// pencarian ini, sesuai permintaan (tidak perlu 3x jalan terpisah).
-function fxSearchWorstPosisiCombos(used, posLabels, controlN, trendN, count){
+// Ranking per posisi (INDEPENDEN — tidak ada lagi kombinasi gabungan lintas posisi/Posisi%)
+// berdasarkan skor WILSON paling rendah tiap formula di posisi itu. `count` formula ber-skor
+// Wilson terendah dikembalikan sebagai peringkat terburuk ke-1..ke-`count` per posisi, lalu
+// tinggal dipasangkan langsung ke Gen2A/2B/2C (peringkat 1 -> A, 2 -> B, 3 -> C) di
+// fxAutoLockGen2FromAutoPercent (automode.js) — tanpa pencarian kombinasi apa pun lagi.
+function fxRankWorstWilsonPerPosition(used, posLabels, controlN, trendN, count){
   const chronoNum = used.slice().reverse();
   const formulas = fxBuildFormulaList(posLabels, controlN);
-  const bottomByLabel = {};
+  const rankedByLabel = {};
   posLabels.forEach((label, idx) => {
     const arr = [];
     formulas.forEach(f => {
       const r = fxTrendAccuracy(f, chronoNum, controlN, trendN, idx);
-      if(r.total > 0) arr.push({ key: f.key, fn: f.fn, kind: f.kind, pct: r.pct });
+      if(r.total > 0) arr.push({ key: f.key, score: wilsonLowerBound(r.hit, r.total) });
     });
-    arr.sort((a, b) => a.pct - b.pct); // ASCENDING — paling rendah duluan
-    bottomByLabel[label] = arr.slice(0, FX_POSISI_TOP_N); // reuse konstanta "6 kandidat", arahnya saja yang dibalik
+    arr.sort((a, b) => a.score - b.score); // ASCENDING — skor Wilson paling rendah duluan
+    rankedByLabel[label] = arr;
   });
-  if(posLabels.some(label => !bottomByLabel[label].length)) return [];
+  if(posLabels.some(label => !rankedByLabel[label].length)) return [];
 
-  const all = [];
-  (function recurse(idx, picks){
-    if(idx === posLabels.length){
-      const selFn = posLabels.map(label => picks[label]);
-      const r = fxJointAccuracy(selFn, posLabels, chronoNum, controlN);
-      const pickedKeys = {};
-      posLabels.forEach((label, i) => { pickedKeys[label] = selFn[i].key; });
-      all.push({ picks: pickedKeys, pct: r.pct, success: r.success, total: r.total });
-      return;
-    }
-    const label = posLabels[idx];
-    bottomByLabel[label].forEach(cand => {
-      picks[label] = cand;
-      recurse(idx + 1, picks);
+  const result = [];
+  for(let rank = 0; rank < count; rank++){
+    const picks = {};
+    posLabels.forEach(label => {
+      const list = rankedByLabel[label];
+      const cand = list[rank] || list[list.length - 1]; // daftar lebih pendek dari rank -> pakai yang paling akhir
+      picks[label] = cand.key;
     });
-  })(0, {});
-
-  all.sort((a, b) => a.pct - b.pct); // ASCENDING — kombinasi paling buruk duluan
-  return all.slice(0, count);
+    result.push({ picks });
+  }
+  return result;
 }
 
 function fxApplyOptimizedN(result, label){
