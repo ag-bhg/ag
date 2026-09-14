@@ -228,7 +228,7 @@ function fxTrendAccuracy(formula, chronoNum, controlN, trendN, posIdx){
 }
 
 // ---------- Optimasi N (Jendela Tren & Kontrol) — bandingkan beberapa kandidat, pilih yang terbaik ----------
-const FX_N_CANDIDATES = [3, 5, 7, 10, 15, 20, 30, 50, 100];
+const FX_N_CANDIDATES = [3, 5, 7, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100];
 
 // Batas bawah interval kepercayaan Wilson (95%) — "menghukum" akurasi dari sampel kecil yang kebetulan tinggi,
 // beda dari persentase mentah (hit/total) yang gampang bias kalau totalnya sedikit.
@@ -242,19 +242,71 @@ function wilsonLowerBound(hit, total, z){
   return (centre - margin) / denom;
 }
 
-// Walk-forward: uji akurasi dari BEBERAPA titik potong mundur (bukan cuma dari data terakhir),
-// lalu gabungkan hasilnya — supaya tidak "beruntung" cuma cocok di beberapa data terakhir saja.
-function fxTrendAccuracyWalkForward(formula, chronoNum, controlN, trendN, posIdx, folds){
-  const step = Math.max(1, Math.floor((trendN === Infinity ? 10 : trendN) / 2));
-  let totalHit = 0, totalCount = 0, foldsUsed = 0;
-  for(let f = 0; f < folds; f++){
-    const trimEnd = chronoNum.length - f * step;
-    if(trimEnd < 2) break;
-    const slice = chronoNum.slice(0, trimEnd);
-    const r = fxTrendAccuracy(formula, slice, controlN, trendN, posIdx);
-    if(r.total > 0){ totalHit += r.hit; totalCount += r.total; foldsUsed++; }
+// ---------- OPTIMIZER "Posisi%" ----------
+// Langsung cari kombinasi formula terbaik lintas posisi A/C/K/E — CNTRL dan Tren TETAP dipakai
+// apa adanya dari dropdown yang aktif sekarang (tidak ikut dicari sama sekali).
+const FX_POSISI_TOP_N = 6; // jumlah kandidat teratas per posisi yang dikombinasikan — tetap, tidak configurable
+
+// Hitung "Akurasi Keseluruhan" (gabungan — wajib benar BERSAMAAN di semua posisi pada baris yang
+// sama) untuk satu kombinasi formula tertentu. Logikanya identik dengan renderFxBacktestTable,
+// tapi dilepas dari FX_SELECTED supaya bisa dipakai menguji kombinasi yang belum tentu aktif di radio.
+function fxJointAccuracy(selFn, posLabels, chronoNum, controlN){
+  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (controlN === Infinity ? 1 : controlN)));
+  let success = 0, total = 0;
+  for(let i = minNeeded; i < chronoNum.length; i++){
+    const windowNewestFirst = chronoNum.slice(0, i).slice().reverse();
+    const target = chronoNum[i];
+    let ok = true;
+    for(let p = 0; p < posLabels.length; p++){
+      let pools;
+      try{ pools = selFn[p].fn(windowNewestFirst); }catch(e){ pools = null; }
+      if(!(pools && pools[p] && pools[p].includes(target[p]))){ ok = false; break; }
+    }
+    if(ok) success++;
+    total++;
   }
-  return { hit: totalHit, total: totalCount, pct: totalCount > 0 ? (totalHit / totalCount * 100) : 0, folds: foldsUsed };
+  return { success, total, pct: total > 0 ? (success / total * 100) : 0 };
+}
+
+// Tahap 2: di Tren pemenang (Tahap 1), ambil TOP-6 formula tiap posisi (akurasi individual
+// tertinggi), lalu coba SEMUA kombinasi lintas posisi (6^jumlah posisi) — pilih kombinasi dengan
+// Akurasi Keseluruhan paling tinggi. Akurasi individual tinggi per posisi TIDAK menjamin Akurasi
+// Keseluruhan tinggi (posisi-posisi itu harus benar BERSAMAAN di baris yang sama), makanya perlu
+// dicoba satu-satu kombinasinya, bukan cuma ambil rank #1 tiap posisi secara independen.
+function fxSearchBestPosisiCombo(used, posLabels, controlN, trendN){
+  const chronoNum = used.slice().reverse();
+  const formulas = fxBuildFormulaList(posLabels, controlN);
+  const topByLabel = {};
+  posLabels.forEach((label, idx) => {
+    const arr = [];
+    formulas.forEach(f => {
+      const r = fxTrendAccuracy(f, chronoNum, controlN, trendN, idx);
+      if(r.total > 0) arr.push({ key: f.key, fn: f.fn, kind: f.kind, pct: r.pct });
+    });
+    arr.sort((a, b) => b.pct - a.pct);
+    topByLabel[label] = arr.slice(0, FX_POSISI_TOP_N);
+  });
+  if(posLabels.some(label => !topByLabel[label].length)) return null;
+
+  let best = null; // { picks: {label:key}, pct, success, total }
+  (function recurse(idx, picks){
+    if(idx === posLabels.length){
+      const selFn = posLabels.map(label => picks[label]);
+      const r = fxJointAccuracy(selFn, posLabels, chronoNum, controlN);
+      if(!best || r.pct > best.pct){
+        const pickedKeys = {};
+        posLabels.forEach((label, i) => { pickedKeys[label] = selFn[i].key; });
+        best = { picks: pickedKeys, pct: r.pct, success: r.success, total: r.total };
+      }
+      return;
+    }
+    const label = posLabels[idx];
+    topByLabel[label].forEach(cand => {
+      picks[label] = cand;
+      recurse(idx + 1, picks);
+    });
+  })(0, {});
+  return best;
 }
 
 // Jalankan pencarian kandidat (controlN x trendN), skor tiap pasangan pakai fungsi `scoreFn`,
@@ -286,32 +338,81 @@ function fxSearchBestN(used, posLabels, scoreFn){
   return best;
 }
 
-// Ensemble/voting: tiap formula & posisi "memilih" pasangan N terbaiknya sendiri (akurasi mentah tertinggi),
-// lalu pasangan yang paling sering menang (voting terbanyak) yang dipakai.
-function fxSearchBestNEnsemble(used, posLabels){
+// ---------- Versi DIBALIK (untuk Gen 2 Auto%) — cari yang PALING BURUK, bukan paling akurat ----------
+// Dipakai HANYA oleh Gen 2 Auto% (lihat fxAutoLockGen2FromAutoPercent di automode.js). Sengaja
+// dipisah total dari fxSearchBestN/fxSearchBestPosisiCombo di atas (tidak menimpa apa pun),
+// dan TIDAK PERNAH menyentuh dropdown Kontrol N/Tren N/Out N atau radio Formula X yang tampil
+// di layar — murni dihitung diam-diam pakai FX_OUT_N yang sedang aktif sekarang sebagai acuan
+// ranking (sama seperti fxSearchBestN yang juga tidak pernah mengubah Out N).
+
+// Wilson dibalik: skor per posisi diambil dari formula PALING RENDAH (bukan paling tinggi),
+// lalu pasangan Control N/Tren N yang dipilih adalah yang skor rata-ratanya PALING RENDAH.
+function fxSearchWorstN(used, posLabels){
   const chronoNum = used.slice().reverse();
-  const votes = {};
-  posLabels.forEach((label, idx) => {
-    FX_N_CANDIDATES.forEach(controlN => {
-      const formulas = fxBuildFormulaList(posLabels, controlN);
-      formulas.forEach(f => {
-        let bestPair = null, bestPct = -1;
-        FX_N_CANDIDATES.forEach(trendN => {
+  let worst = null;
+  FX_N_CANDIDATES.forEach(controlN => {
+    const formulas = fxBuildFormulaList(posLabels, controlN);
+    FX_N_CANDIDATES.forEach(trendN => {
+      let sumScore = 0, posCounted = 0;
+      posLabels.forEach((label, idx) => {
+        let worstScore = Infinity;
+        formulas.forEach(f => {
           const r = fxTrendAccuracy(f, chronoNum, controlN, trendN, idx);
-          if(r.total > 0 && r.pct > bestPct){ bestPct = r.pct; bestPair = { controlN, trendN }; }
+          if(r.total > 0){
+            const score = wilsonLowerBound(r.hit, r.total);
+            if(score < worstScore) worstScore = score;
+          }
         });
-        if(bestPair){
-          const key = bestPair.controlN + '_' + bestPair.trendN;
-          votes[key] = (votes[key] || 0) + 1;
-        }
+        if(worstScore < Infinity){ sumScore += worstScore; posCounted++; }
       });
+      if(posCounted === posLabels.length){
+        const avgScore = sumScore / posCounted;
+        if(!worst || avgScore < worst.avgScore) worst = { controlN, trendN, avgScore };
+      }
     });
   });
-  let bestKey = null, bestVotes = -1;
-  Object.keys(votes).forEach(key => { if(votes[key] > bestVotes){ bestVotes = votes[key]; bestKey = key; } });
-  if(!bestKey) return null;
-  const [controlN, trendN] = bestKey.split('_').map(Number);
-  return { controlN, trendN, votes: bestVotes };
+  return worst;
+}
+
+// Posisi% dibalik: kandidat per posisi diambil dari BOTTOM-6 (akurasi individual PALING
+// RENDAH, bukan top-6), lalu SEMUA kombinasi lintas posisi dihitung Akurasi Keseluruhan-nya,
+// diurutkan dari yang PALING RENDAH, dan `count` kombinasi TERENDAH dikembalikan sekaligus
+// (bukan cuma satu) — supaya Gen2A/2B/2C bisa diisi peringkat terendah ke-1/2/3 dari SATU KALI
+// pencarian ini, sesuai permintaan (tidak perlu 3x jalan terpisah).
+function fxSearchWorstPosisiCombos(used, posLabels, controlN, trendN, count){
+  const chronoNum = used.slice().reverse();
+  const formulas = fxBuildFormulaList(posLabels, controlN);
+  const bottomByLabel = {};
+  posLabels.forEach((label, idx) => {
+    const arr = [];
+    formulas.forEach(f => {
+      const r = fxTrendAccuracy(f, chronoNum, controlN, trendN, idx);
+      if(r.total > 0) arr.push({ key: f.key, fn: f.fn, kind: f.kind, pct: r.pct });
+    });
+    arr.sort((a, b) => a.pct - b.pct); // ASCENDING — paling rendah duluan
+    bottomByLabel[label] = arr.slice(0, FX_POSISI_TOP_N); // reuse konstanta "6 kandidat", arahnya saja yang dibalik
+  });
+  if(posLabels.some(label => !bottomByLabel[label].length)) return [];
+
+  const all = [];
+  (function recurse(idx, picks){
+    if(idx === posLabels.length){
+      const selFn = posLabels.map(label => picks[label]);
+      const r = fxJointAccuracy(selFn, posLabels, chronoNum, controlN);
+      const pickedKeys = {};
+      posLabels.forEach((label, i) => { pickedKeys[label] = selFn[i].key; });
+      all.push({ picks: pickedKeys, pct: r.pct, success: r.success, total: r.total });
+      return;
+    }
+    const label = posLabels[idx];
+    bottomByLabel[label].forEach(cand => {
+      picks[label] = cand;
+      recurse(idx + 1, picks);
+    });
+  })(0, {});
+
+  all.sort((a, b) => a.pct - b.pct); // ASCENDING — kombinasi paling buruk duluan
+  return all.slice(0, count);
 }
 
 function fxApplyOptimizedN(result, label){
@@ -336,7 +437,6 @@ function fxRunOptimizer(label, computeFn){
   const buttons = [
     document.getElementById('fxOptWilsonBtn'),
     document.getElementById('fxOptWalkBtn'),
-    document.getElementById('fxOptEnsembleBtn'),
     document.getElementById('fxRecalcBtn')
   ];
   buttons.forEach(b => b.disabled = true);
@@ -413,30 +513,87 @@ document.querySelectorAll('input[name="fxDataSource"]').forEach(radio => {
   });
 });
 
+// Inti optimizer "Auto%" (Wilson -> Posisi%), dilepas dari handler tombol supaya bisa dipanggil
+// ulang dari luar (mis. Mode Auto, lihat fxAutoLockGen1FromPreset di automode.js) tanpa lewat
+// klik tombol/spinner. Mengasumsikan lastHistoryNumbers/lastPosLabels sudah segar saat dipanggil.
+// Return true kalau berhasil set FX_SELECTED, false kalau data belum cukup.
+function fxRunAutoPercentCore(){
+  const status = document.getElementById('fxStatus');
+
+  // Tahap 1: cari CNTRL+Tren terbaik pakai skor Wilson (persis logika lama tombol Wilson Score).
+  const best = fxSearchBestN(lastHistoryNumbers, lastPosLabels, fxTrendAccuracy);
+  if(!best){
+    status.style.color = 'var(--rose)';
+    status.textContent = 'Data historis belum cukup untuk mengoptimalkan N.';
+    return false;
+  }
+  fxApplyOptimizedN(best, 'Wilson Score'); // set dropdown CNTRL/Tren + computeFormulaX ulang
+
+  // Tahap 2: begitu Tahap 1 selesai, lanjut cari kombinasi top-6 posisi (persis logika tombol
+  // Posisi%) — tapi CNTRL/Tren-nya dari hasil Wilson di Tahap 1, bukan dari dropdown lama.
+  const combo = fxSearchBestPosisiCombo(lastHistoryNumbers, lastPosLabels, best.controlN, best.trendN);
+  if(!combo){
+    status.style.color = 'var(--rose)';
+    status.textContent = `Kontrol N=${best.controlN}, Tren N=${best.trendN} — kombinasi posisi gagal dihitung.`;
+    return false;
+  }
+  lastPosLabels.forEach(label => {
+    const idx = (FX_RECOMMENDATIONS[label] || []).findIndex(r => r.key === combo.picks[label]);
+    if(idx >= 0){ FX_SELECTED[label] = idx; FX_TOUCHED[label] = true; }
+  });
+  renderFormulaX(lastPosLabels);
+  renderFxTrendNumbers(lastPosLabels, lastHistoryNumbers);
+  renderTopPosisi(lastPosLabels, lastHistoryNumbers);
+  renderFxBacktestTable(lastPosLabels, lastHistoryNumbers);
+  fxApplyToGenerator(true);
+  if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
+  if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
+
+  status.style.color = 'var(--teal)';
+  status.textContent = `Auto%: Kontrol N=${best.controlN}, Tren N=${best.trendN} — Akurasi Keseluruhan ${combo.pct.toFixed(1)}% (${combo.success}/${combo.total}).`;
+  return true;
+}
+
 document.getElementById('fxOptWilsonBtn').addEventListener('click', () => {
   fxRefreshHistoryIfTerbaru();
   if(!lastHistoryNumbers.length || !lastPosLabels) return;
-  fxRunOptimizer('Wilson Score', () => {
-    const best = fxSearchBestN(lastHistoryNumbers, lastPosLabels, fxTrendAccuracy);
-    fxApplyOptimizedN(best, 'Wilson Score');
-  });
+  fxRunOptimizer('Auto%', () => { fxRunAutoPercentCore(); });
 });
 
 document.getElementById('fxOptWalkBtn').addEventListener('click', () => {
   fxRefreshHistoryIfTerbaru();
   if(!lastHistoryNumbers.length || !lastPosLabels) return;
-  fxRunOptimizer('Walk-Forward', () => {
-    const best = fxSearchBestN(lastHistoryNumbers, lastPosLabels, (f, chrono, cN, tN, idx) => fxTrendAccuracyWalkForward(f, chrono, cN, tN, idx, 5));
-    fxApplyOptimizedN(best, 'Walk-Forward');
-  });
-});
+  fxRunOptimizer('Posisi%', () => {
+    const status = document.getElementById('fxStatus');
+    const controlNRaw = document.getElementById('fxControlN').value;
+    const trendNRaw = document.getElementById('fxTrendN').value;
+    const controlN = controlNRaw === 'all' ? Infinity : parseInt(controlNRaw, 10);
+    const trendN = trendNRaw === 'all' ? Infinity : parseInt(trendNRaw, 10);
 
-document.getElementById('fxOptEnsembleBtn').addEventListener('click', () => {
-  fxRefreshHistoryIfTerbaru();
-  if(!lastHistoryNumbers.length || !lastPosLabels) return;
-  fxRunOptimizer('Ensemble', () => {
-    const best = fxSearchBestNEnsemble(lastHistoryNumbers, lastPosLabels);
-    fxApplyOptimizedN(best, 'Ensemble');
+    // Langsung cari kombinasi top-6 per posisi dengan Akurasi Keseluruhan tertinggi — CNTRL &
+    // Tren dipakai apa adanya dari dropdown, sama sekali tidak diubah/dicari.
+    const combo = fxSearchBestPosisiCombo(lastHistoryNumbers, lastPosLabels, controlN, trendN);
+    if(!combo){
+      status.style.color = 'var(--rose)';
+      status.textContent = 'Data historis belum cukup untuk mencari kombinasi posisi terbaik.';
+      return;
+    }
+
+    // Arahkan radio tiap posisi ke formula pemenang kombinasi (bukan cuma rank #1 independen).
+    lastPosLabels.forEach(label => {
+      const idx = (FX_RECOMMENDATIONS[label] || []).findIndex(r => r.key === combo.picks[label]);
+      if(idx >= 0){ FX_SELECTED[label] = idx; FX_TOUCHED[label] = true; }
+    });
+    renderFormulaX(lastPosLabels);
+    renderFxTrendNumbers(lastPosLabels, lastHistoryNumbers);
+    renderTopPosisi(lastPosLabels, lastHistoryNumbers);
+    renderFxBacktestTable(lastPosLabels, lastHistoryNumbers);
+    fxApplyToGenerator(true);
+    if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
+    if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
+
+    status.style.color = 'var(--teal)';
+    status.textContent = `Posisi%: Akurasi Keseluruhan ${combo.pct.toFixed(1)}% (${combo.success}/${combo.total}).`;
   });
 });
 
@@ -463,8 +620,7 @@ function computeFormulaX(used, posLabels){
   FX_RECOMMENDATIONS = recs;
 
   // Selalu arahkan pilihan (radio) ke urutan/index dengan akurasi tertinggi (index 0) tiap kali
-  // dihitung ulang / dioptimalkan (Hitung Ulang, Pilih N Wilson, Pilih N Walk-Forward, Pilih N
-  // Ensemble) — tidak mempertahankan pilihan lama.
+  // dihitung ulang / dioptimalkan (Hitung Ulang, Auto%, Posisi%) — tidak mempertahankan pilihan lama.
   posLabels.forEach(label => {
     FX_SELECTED[label] = recs[label].length ? 0 : null;
     FX_TOUCHED[label] = false; // reset penanda "sudah dipilih manual" tiap hitung ulang
