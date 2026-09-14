@@ -699,6 +699,94 @@
   .checkList{ list-style:none; margin:14px 0 0; padding:0; border-top:1px solid var(--line); padding-top:12px; }
   .checkList li{ font-size:13px; color:var(--ink-dim); padding:5px 0; }
 
+  /* ── Status "Pengaturan Aktif" (Semi Auto/Auto) — dirapatkan jadi 2 kolom biar tidak
+     memanjang ke bawah, tapi semua angka/pengaturan tetap tercatat lengkap ── */
+  .statusBox{
+    margin:12px 0 0; padding-top:10px; border-top:1px solid var(--line);
+    font-family:var(--mono); font-size:11.5px; color:var(--ink-dim); line-height:1.45;
+  }
+  .statusBox .statusHead{ color:var(--amber); font-weight:800; text-transform:uppercase; letter-spacing:.03em; font-size:10.5px; margin:8px 0 4px; }
+  .statusBox .statusHead:first-child{ margin-top:2px; }
+  .statusBox .statusArrow{ color:var(--teal); font-weight:700; margin:5px 0 3px; }
+  .statusBox .statusLine{ color:var(--ink); padding:1px 0; word-break:break-word; }
+  .statusBox .statusGrid2col{
+    display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-bottom:4px;
+  }
+  .statusBox .statusCell{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:7px;
+    padding:4px 6px; color:var(--ink); font-size:10.5px; line-height:1.35; overflow-wrap:anywhere;
+  }
+
+  /* ── Layout 2-kolom baru untuk Pengaturan Aktif ── */
+  .stBox{
+    margin:10px 0 0; padding-top:10px; border-top:1px solid var(--line);
+    font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); line-height:1.4;
+  }
+  .stBasisRow{
+    margin-bottom:6px; font-size:11px;
+  }
+  .stBasisKey{ color:var(--ink-dim); font-weight:700; }
+  .stBasisVal{ color:var(--ink); font-weight:800; margin-left:4px; }
+
+  /* 2 kolom utama: kiri (Gen1+Gen2a) | kanan (Gen2b+Gen2c) */
+  .stMainGrid{
+    display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:6px;
+  }
+  .stCol{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:9px;
+    padding:6px 8px; min-width:0;
+  }
+  .stSecHead{
+    color:var(--amber); font-weight:800; text-transform:uppercase;
+    letter-spacing:.04em; font-size:9.5px; margin-bottom:5px;
+  }
+  .stGenHead{
+    display:flex; align-items:baseline; gap:4px; margin-bottom:2px; flex-wrap:wrap;
+  }
+  .st2label{ color:var(--teal); font-weight:800; font-size:10.5px; }
+  .st2kv{ color:var(--ink); font-weight:700; font-size:10px; }
+  .st2dim{ color:var(--ink-dim); font-size:10px; font-style:italic; }
+  .st2row{ color:var(--ink-dim); font-size:9.5px; margin-bottom:2px; }
+  /* posisi grid dalam kolom — 2 sel per baris */
+  .stCol .statusGrid2col{
+    display:grid; grid-template-columns:1fr 1fr; gap:3px; margin-bottom:3px;
+  }
+  .stCol .statusCell{
+    background:var(--panel); border:1px solid var(--line); border-radius:6px;
+    padding:3px 5px; color:var(--ink); font-size:9.5px; line-height:1.3; overflow-wrap:anywhere;
+  }
+  /* Cell posisi (A/C/K/E) di semua grid — Gen 1, Gen 2a/2b/2c — 1 tingkat lebih kecil
+     & lebih mepet karena teksnya pakai separator "|" (bukan spasi) dari statusPosLine() */
+  .stCol .statusCell.stCompactCell{
+    font-size:9px; padding:3px 4px; letter-spacing:-.01em;
+  }
+
+  /* Filter yang di pilih — 2 kolom */
+  .stFilterHead{
+    color:var(--amber); font-weight:800; text-transform:uppercase;
+    letter-spacing:.04em; font-size:9.5px; margin:6px 0 4px;
+  }
+  .stFiltGrid{
+    display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:4px;
+  }
+  .stFiltCol{
+    background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
+    padding:5px 7px; min-width:0;
+  }
+  .stFiltLabel{
+    color:var(--teal); font-weight:800; font-size:10px; margin-bottom:3px;
+  }
+  .stFiltSub{ color:var(--ink-dim); font-weight:400; font-size:9.5px; }
+  .stFiltSubSection{ margin-top:4px; padding-top:4px; border-top:1px solid var(--line); }
+  .stFiltLine{ color:var(--ink); font-size:9.5px; padding:1px 0; overflow-wrap:anywhere; }
+
+  .stTambahan{
+    color:var(--ink-dim); font-weight:700; font-size:9.5px; margin-top:5px;
+  }
+  .stTambahanVal{
+    color:var(--ink); font-size:9.5px; overflow-wrap:anywhere; padding:1px 0;
+  }
+
   .infoBox{
     display:flex; gap:8px; align-items:flex-start; background:var(--panel-2);
     border:1px solid var(--line); border-radius:14px; padding:12px 14px;
