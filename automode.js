@@ -379,10 +379,21 @@ async function fxAutoLockGen1FromPreset(maxAttempts = 3, delayMs = 300){
     await fxSleep(delayMs);
   }
 
-  // 3) Isi pool Gen 1 sesuai Preset Aktif / FX_SELECTED — tidak perlu proses simpan tambahan,
-  // sudah otomatis ikut preset yang disalurkan ke FX_SELECTED.
+  // 3) Preset Aktif tetap SELALU diterapkan dulu, utuh (bulkOut, Top Posisi, Twin Murni, Shio,
+  // DAN fxSelected bawaan preset) — supaya bagian-bagian lain di luar Gen1 tidak ikut hilang.
   if(presetPendingExtra && typeof presetApplyExtraNow === 'function') presetApplyExtraNow(presetPendingExtra);
-  const pools = fxBuildGen1Pools(lastPosLabels, lastHistoryNumbers); // selalu ikut FX_SELECTED (preset)
+
+  // 3b) Kalau dropdown "Pilih Sumber GEN1" (#autoGen1SourceSelect) = "auto", TIMPA FX_SELECTED
+  // yang barusan dipasang preset dengan hasil optimizer Auto% (Wilson -> Posisi%), dihitung ULANG
+  // setiap siklus ini supaya formula per posisi selalu ikut akurasi data terbaru, bukan preset.
+  // Kalau "manual" (default lama, arti sebenarnya "ikuti Preset") -> tidak ada perubahan sama sekali.
+  const gen1SourceEl = document.getElementById('autoGen1SourceSelect');
+  const gen1Source = gen1SourceEl ? gen1SourceEl.value : 'manual';
+  if(gen1Source === 'auto' && typeof fxRunAutoPercentCore === 'function'){
+    fxRunAutoPercentCore();
+  }
+
+  const pools = fxBuildGen1Pools(lastPosLabels, lastHistoryNumbers); // ikut FX_SELECTED (Auto% atau Preset)
   if(!pools) return false;
 
   // 4) Kunci kembali Gen 1 dengan data segar.
@@ -394,6 +405,68 @@ async function fxAutoLockGen1FromPreset(maxAttempts = 3, delayMs = 300){
   fxGen1LockedFP = dataFingerprint(lastHistoryNumbers);
   renderGen1LockUI();
   return true;
+}
+
+// ── Gen 2 Auto% (dropdown "Pilih Sumber GEN2" = auto) — TERPISAH TOTAL dari jalur Manual
+// (fxApplyGen2Rule/computeFormulaXPure/pickWorstRank/WORST_RANK_BY_SLOT di atas SAMA SEKALI
+// TIDAK disentuh/diubah oleh fungsi ini, supaya Manual tetap presis seperti sebelumnya). ──
+//
+// Alur: SATU KALI pencarian dibalik (Wilson dibalik -> Posisi% dibalik, lihat fxSearchWorstN/
+// fxSearchWorstPosisiCombos di formula.js) menghasilkan 1 pasang Control N/Tren N + 3 kombinasi
+// formula per posisi berperingkat TERENDAH ke-1/2/3 SEKALIGUS — bukan 3x pencarian terpisah.
+// Peringkat terendah ke-1 -> Gen2A, ke-2 -> Gen2B, ke-3 -> Gen2C, lalu langsung dikunci.
+//
+// Out N tiap slot TETAP ikut Preset (s.rule.outN yang sudah dimuat presetApplyGen2 — trendN/
+// controlN di rule itu TIDAK dipakai di sini, cuma outN-nya yang dipinjam) — supaya preset
+// Out 7,7,7 atau 5,6,7 tetap kepakai persis, walau metode pemilihan formulanya sudah beda.
+// Pencarian sendiri (ranking) pakai Out N yang SEDANG AKTIF di dropdown Formula X sekarang
+// sebagai acuan tunggal — tidak ikut dicari/diubah (sama seperti fxSearchBestN Gen1).
+function fxAutoLockGen2FromAutoPercent(){
+  if(!lastPosLabels || !lastPosLabels.length || !lastHistoryNumbers.length) return false;
+  if(typeof fxSearchWorstN !== 'function' || typeof fxSearchWorstPosisiCombos !== 'function') return false;
+
+  const worstN = fxSearchWorstN(lastHistoryNumbers, lastPosLabels);
+  if(!worstN) return false;
+
+  const combos = fxSearchWorstPosisiCombos(lastHistoryNumbers, lastPosLabels, worstN.controlN, worstN.trendN, FX_GEN2_SLOTS.length);
+  if(!combos.length) return false;
+
+  const formulas = fxBuildFormulaList(lastPosLabels, worstN.controlN);
+  const byKey = {};
+  formulas.forEach(f => { byKey[f.key] = f; });
+
+  const fp = dataFingerprint(lastHistoryNumbers);
+  const fallbackOutN = document.getElementById('fxOutN') ? document.getElementById('fxOutN').value : '8';
+  let anyOk = false;
+
+  FX_GEN2_SLOTS.forEach((slot, i) => {
+    // Kombinasi kurang dari 3 (data historis masih sangat sedikit) -> slot sisa pakai kombinasi
+    // paling buruk yang tersedia terakhir, daripada dibiarkan kosong.
+    const combo = combos[i] || combos[combos.length - 1];
+    if(!combo) return;
+    const s = fxGen2State[slot];
+    const outNRaw = (s.rule && s.rule.outN) ? s.rule.outN : fallbackOutN; // Out N ikut Preset per slot
+    const prevOutN = FX_OUT_N;
+    FX_OUT_N = parseInt(outNRaw, 10) || 8;
+    try{
+      const pools = lastPosLabels.map((label, idx) => {
+        const f = byKey[combo.picks[label]];
+        let pool = [];
+        if(f){ try{ pool = f.fn(lastHistoryNumbers)[idx] || []; }catch(e){} }
+        return pool;
+      });
+      if(pools.some(p => !p.length)) return;
+      s.locked = true;
+      s.pools = pools;
+      s.posLabels = lastPosLabels.slice();
+      s.fp = fp;
+      anyOk = true;
+    } finally {
+      FX_OUT_N = prevOutN;
+    }
+  });
+
+  return anyOk;
 }
 
 // ── Auto-unlock semua saat pasaran berganti ──
@@ -664,10 +737,21 @@ function showModeView(mode){
   });
   const semiPanel = document.getElementById('semiAutoSettingsPanel');
   if(semiPanel) semiPanel.style.display = (mode === 'semi') ? '' : 'none';
-  // Semi Auto: pengaturan sudah otomatis (Preset Strategi + Angka Bahan Gen 1), jadi menu
-  // "Pengaturan Analisa" (Formula X/Jumlah & Selisih/Ai Ai/Shio 234) disembunyikan.
+  const autoPanel = document.getElementById('autoSettingsPanel');
+  if(autoPanel) autoPanel.style.display = (mode === 'auto') ? '' : 'none';
+  // Semi Auto & Auto: pengaturan sudah dikelola lewat panel masing-masing (Preset + Sumber
+  // Gen1/Gen2), jadi menu "Pengaturan Analisa" (Formula X/Jumlah & Selisih/Ai Ai/Shio 234)
+  // disembunyikan di kedua mode itu.
   const pengaturanAnalisa = document.getElementById('pengaturanAnalisaSection');
-  if(pengaturanAnalisa) pengaturanAnalisa.style.display = (mode === 'semi') ? 'none' : '';
+  if(pengaturanAnalisa) pengaturanAnalisa.style.display = (mode === 'semi' || mode === 'auto') ? 'none' : '';
+  // Sinkronkan tampilan tombol "Aktifkan Auto"/"Stop Auto" + status disabled dropdown Preset/
+  // Sumber GEN1/GEN2 ke status RIIL mode saat ini (getAppMode()) — bukan ke `mode` parameter di
+  // atas (yang cuma panel yang sedang DILIHAT/preview). Jadi walau user sedang melihat-lihat
+  // panel Normal/Semi, kalau Mode Auto sebenarnya masih berjalan, begitu balik ke panel Auto
+  // tombol & dropdown tetap kebaca "sedang berjalan".
+  if(typeof applyAutoUiRunningState === 'function'){
+    applyAutoUiRunningState(typeof getAppMode === 'function' && getAppMode() === 'auto');
+  }
 }
 
 function setAppMode(mode){
@@ -746,12 +830,22 @@ async function runAutoPipelineAfterFormulaX(){
 
   // Pastikan Gen 2 tersinkron ke Preset (retry sampai 3x) SEBELUM Auto Generate jalan.
   // Kalau tetap gagal, HENTIKAN pipeline di sini — jangan lanjut dengan Gen2 live.
-  const gen2Ok = await fxEnsureGen2MatchesPreset(3, 300);
+  // Dropdown "Pilih Sumber GEN2" (#autoGen2SourceSelect): "manual" (default lama) -> jalur
+  // fxEnsureGen2MatchesPreset() SAMA PERSIS seperti sebelumnya, tidak diubah sama sekali.
+  // "auto" -> jalur BARU fxAutoLockGen2FromAutoPercent() (lihat definisinya di atas), terpisah
+  // total, tidak lewat fxApplyGen2Rule/computeFormulaXPure sama sekali.
+  const gen2SourceEl = document.getElementById('autoGen2SourceSelect');
+  const gen2Source = gen2SourceEl ? gen2SourceEl.value : 'manual';
+  const gen2Ok = (gen2Source === 'auto' && typeof fxAutoLockGen2FromAutoPercent === 'function')
+    ? fxAutoLockGen2FromAutoPercent()
+    : await fxEnsureGen2MatchesPreset(3, 300);
   renderGen1LockUI();
   FX_GEN2_SLOTS.forEach(renderGen2LockUI);
 
   if(!gen2Ok){
-    const msg = 'Gen 2 gagal disesuaikan dengan Preset setelah 3x percobaan (data pasaran kemungkinan belum sinkron). Muat ulang halaman, lalu jalankan Mode Auto/Semi Auto lagi.';
+    const msg = gen2Source === 'auto'
+      ? 'Gen 2 (Auto%) gagal dihitung — data historis kemungkinan belum cukup/sinkron. Muat ulang halaman, lalu jalankan Mode Auto lagi.'
+      : 'Gen 2 gagal disesuaikan dengan Preset setelah 3x percobaan (data pasaran kemungkinan belum sinkron). Muat ulang halaman, lalu jalankan Mode Auto/Semi Auto lagi.';
     document.getElementById('modeFeedback').textContent = msg;
     alert(msg);
     return 'gen2-failed';
@@ -830,12 +924,61 @@ async function runAutoPipeline(){
   return await runAutoPipelineAfterFormulaX();
 }
 
+// ── Pill AUTO: cuma pindah tampilan ke panel Pengaturan Auto — TIDAK langsung mengaktifkan
+// mode. Mode baru benar-benar commit saat tombol "Aktifkan Auto" ditekan (sama pola dengan
+// pill Semi Auto / tombol "Aktifkan Semi Auto"). ──
 document.getElementById('modeAutoBtn').addEventListener('click', ()=>{
+  showModeView('auto');
+  document.getElementById('autoSettingsFeedback').textContent = '';
+});
+
+// ── Pengaman: tombol "Aktifkan Auto" berubah jadi "Stop Auto" selama Mode Auto berjalan, dan
+// dropdown Preset/Sumber GEN1/Sumber GEN2 dikunci (disabled) supaya tidak diubah diam-diam
+// selagi pipeline auto sedang jalan — baru bisa diubah lagi setelah "Stop Auto" ditekan. ──
+function applyAutoUiRunningState(running){
+  const btn = document.getElementById('autoActivateBtn');
+  if(btn) btn.textContent = running ? '⏹ Stop Auto' : '⚡ Aktifkan Auto';
+  ['autoPresetSelect', 'autoGen1SourceSelect', 'autoGen2SourceSelect'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.disabled = running;
+  });
+}
+
+// ── Tombol "Aktifkan Auto": validasi Preset (dropdown "Pilih Preset"), commit mode Auto,
+// lalu jalankan pipeline — persis logika lama yang dulu menempel di klik pill "Auto".
+// Begitu Mode Auto berjalan, tombol yang sama berfungsi sebagai "Stop Auto". ──
+document.getElementById('autoActivateBtn').addEventListener('click', ()=>{
+  const feedback = document.getElementById('autoSettingsFeedback');
+
+  // Mode Auto SEDANG berjalan -> tombol ini bertindak sebagai STOP: lepas kunci Gen1/Gen2 &
+  // kembalikan pengaturan ke default (proses internal SAMA seperti pill "Normal"), TAPI TANPA
+  // memindahkan tampilan ke panel Normal — tetap di panel Pengaturan Auto ini, supaya user bisa
+  // langsung pilih Preset/Sumber baru & tekan "Aktifkan Auto" lagi dari sini juga.
+  if(typeof getAppMode === 'function' && getAppMode() === 'auto'){
+    if(typeof showLoadingOverlay === 'function') showLoadingOverlay('Menghentikan Mode Auto...');
+    setModeButtonsDisabled(true);
+    setTimeout(() => {
+      try{
+        localStorage.setItem(APP_MODE_KEY, 'normal'); // ganti status internal SAJA, tanpa showModeView('normal')
+        resetAllSettings(); // termasuk unlockGen1Gen2() di dalamnya
+        analyze();
+        showModeView('auto'); // paksa tetap di panel Auto — juga otomatis mengembalikan tombol jadi "Aktifkan Auto" & dropdown aktif lagi
+        feedback.textContent = 'Mode Auto dihentikan — pengaturan dikembalikan ke default. Pilih Preset & Sumber lagi untuk mengaktifkan.';
+        document.getElementById('modeFeedback').textContent = feedback.textContent;
+      } finally {
+        if(typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        setModeButtonsDisabled(false);
+      }
+    }, 30);
+    return;
+  }
+
   const name = getActivePresetName();
-  if(!name){ alert('Pilih dulu "Preset Aktif" di card Preset Pengaturan.'); return; }
+  if(!name){ feedback.textContent = 'Pilih dulu "Pilih Preset" di atas.'; return; }
   const ok = presetLoad(name, {refreshCoverData: false});
-  if(!ok){ alert(`Preset "${name}" tidak ditemukan — pilih ulang Preset Aktif.`); return; }
+  if(!ok){ feedback.textContent = `Preset "${name}" tidak ditemukan — pilih ulang Preset.`; return; }
   setAppMode('auto');
+  applyAutoUiRunningState(true);
 
   // Kalau pasaran/periode SUDAH kepilih dari sebelumnya (dropdown tidak akan trigger
   // event "change" kalau tidak diganti), paksa reload+analyze() di sini juga — supaya
@@ -844,9 +987,11 @@ document.getElementById('modeAutoBtn').addEventListener('click', ()=>{
   const kodeSudahDipilih = (typeof firebaseSelectedKode === 'function') ? firebaseSelectedKode() : '';
   const pipelineLangsungJalan = kodeSudahDipilih && firebaseLoadSelectedData({auto:false});
 
-  document.getElementById('modeFeedback').textContent = pipelineLangsungJalan
+  const msg = pipelineLangsungJalan
     ? `Mode Auto — preset "${name}" dimuat & pipeline otomatis sudah jalan untuk pasaran "${kodeSudahDipilih}". Ganti pasaran/periode kapan saja untuk menjalankan ulang.`
     : `Mode Auto — preset "${name}" dimuat. Pilih pasaran/periode di bawah untuk menjalankan alur Formula X → Generate → Filter otomatis.`;
+  feedback.textContent = msg;
+  document.getElementById('modeFeedback').textContent = msg;
 
   // Tetap arahkan ke pemilihan pasaran/periode di halaman Analisis — baik supaya user
   // bisa langsung ganti periode (kalau pipeline sudah jalan), atau supaya user memilih
@@ -960,5 +1105,6 @@ document.getElementById('modeSemiAutoBtnHome').addEventListener('click', ()=>{
 });
 document.getElementById('modeAutoBtnHome').addEventListener('click', ()=>{
   document.getElementById('modeAutoBtn').click();
+  if(typeof window.goPage === 'function') window.goPage('analisis');
 });
 
