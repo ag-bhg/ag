@@ -367,7 +367,14 @@ function presetApplyExtraNow(extra){
   // Formula X per posisi: timpa lagi rangking #1 bawaan computeFormulaX() dengan POSISI/URUTAN
   // yang disimpan di preset (bukan nama formula lagi) — supaya preset ikut "radio ke berapa",
   // konsisten walau nama/urutan formula di daftar rekomendasi berubah antar pasaran.
-  if(extra.fxSelected && FX_RECOMMENDATIONS){
+  // DIKECUALIKAN untuk Mode Normal: radio Formula X di Mode Normal harus bebas dari pengaruh
+  // Preset sama sekali (baik hasil computeFormulaX() rank #1 default, hasil klik radio manual,
+  // MAUPUN hasil tombol Auto%/Posisi% — keduanya cuma ada di panel Mode Normal) — supaya begitu
+  // Auto%/Posisi% baru saja mengarahkan radio ke hasil hitungannya, hook ini TIDAK langsung
+  // menariknya balik ke pilihan Preset. Mode Semi Auto/Auto TIDAK terpengaruh baris ini (perilaku
+  // lama tetap: radio ikut Preset seperti biasa).
+  const skipFxSelectedForNormal = (typeof getAppMode === 'function') && getAppMode() === 'normal';
+  if(extra.fxSelected && FX_RECOMMENDATIONS && !skipFxSelectedForNormal){
     let changed = false;
     lastPosLabels.forEach(label => {
       const idx = extra.fxSelected[label];
