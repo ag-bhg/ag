@@ -465,13 +465,18 @@ function renderPresetList(){
   const names = Object.keys(all);
   document.getElementById('presetCountBadge').textContent = names.length + '/' + PRESET_MAX_COUNT + ' preset';
 
-  // Isi ulang dropdown "Preset Aktif", pertahankan pilihan yang masih valid.
+  // Isi ulang dropdown "Preset Aktif" (Semi Auto) & "Pilih Preset" (Auto) — sama-sama
+  // merujuk ke ACTIVE_PRESET_KEY yang sama, jadi selalu sinkron satu sama lain.
   const sel = document.getElementById('activePresetSelect');
+  const autoSel = document.getElementById('autoPresetSelect');
   const prevActive = getActivePresetName();
-  sel.innerHTML = '<option value="">— Belum dipilih —</option>' +
+  const optionsHtml = '<option value="">— Belum dipilih —</option>' +
     names.map(n => `<option value="${n}">${n}</option>`).join('');
+  sel.innerHTML = optionsHtml;
+  if(autoSel) autoSel.innerHTML = optionsHtml;
   if(names.includes(prevActive)){
     sel.value = prevActive;
+    if(autoSel) autoSel.value = prevActive;
   } else {
     setActivePresetName('');
   }
@@ -515,6 +520,19 @@ document.getElementById('activePresetSelect').addEventListener('change', (e)=>{
   document.getElementById('presetFeedback').textContent = e.target.value
     ? `Preset aktif diset ke "${e.target.value}".`
     : 'Preset aktif dikosongkan.';
+  const autoSel = document.getElementById('autoPresetSelect');
+  if(autoSel) autoSel.value = e.target.value;
+});
+
+// Dropdown "Pilih Preset" di panel Pengaturan Auto — sama-sama menyetel ACTIVE_PRESET_KEY,
+// disinkronkan balik ke dropdown "Preset Aktif" (Semi Auto) supaya tidak pernah beda nilai.
+document.getElementById('autoPresetSelect').addEventListener('change', (e)=>{
+  setActivePresetName(e.target.value);
+  const semiSel = document.getElementById('activePresetSelect');
+  if(semiSel) semiSel.value = e.target.value;
+  document.getElementById('autoSettingsFeedback').textContent = e.target.value
+    ? `Preset diset ke "${e.target.value}".`
+    : 'Preset dikosongkan.';
 });
 
 document.getElementById('presetSaveBtn').addEventListener('click', ()=>{
