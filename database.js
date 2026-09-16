@@ -423,6 +423,13 @@ let firebaseMarketEntries = [];
 let firebaseMarketMap = {};
 let firebaseDataReady = false;
 let firebaseCountdownTimer = null;
+// Snapshot "kode + isi data" TERAKHIR yang benar-benar sudah diproses (analyze/reset/lock-unlock
+// dijalankan) lewat firebaseLoadSelectedData(). Dipakai supaya snapshot Firebase yang masuk
+// TAPI datanya sama persis dengan yang sudah dimuat (mis. pasaran lain yang update, sedangkan
+// pasaran yang sedang dibuka user tidak berubah) tidak memicu reset/analyze/unlock ulang —
+// hanya kode+data pasaran yang SEDANG DIBUKA user yang relevan di sini, bukan snapshot Firebase
+// secara keseluruhan (yang berisi SEMUA pasaran & berubah tiap kali SATU SAJA di antaranya update).
+let firebaseLastProcessed = { kode: '', data: '' };
 
 const S1_JADWAL_PASARAN = {"TTM 13:00":{"nama":"TOTO MACAU 13:00","draws":[["13:00","13:15"]],"hari":null},"TTM 00:00":{"nama":"TOTO MACAU 00:00","draws":[["00:00","00:15"]],"hari":null},"TTM 16:00":{"nama":"TOTO MACAU 16:00","draws":[["16:00","16:15"]],"hari":null},"TTM 19:00":{"nama":"TOTO MACAU 19:00","draws":[["19:00","19:15"]],"hari":null},"TTM 22:00":{"nama":"TOTO MACAU 22:00","draws":[["22:00","22:15"]],"hari":null},"TTM 23:00":{"nama":"TOTO MACAU 23:00","draws":[["23:00","23:15"]],"hari":null},"HK":{"nama":"HONGKONG","draws":[["22:45","23:00"]],"hari":null},"HKE":{"nama":"HONGKONGEVE","draws":[["18:15","18:30"]],"hari":null},"HKL":{"nama":"HONGKONG LOTTO","draws":[["22:45","23:00"]],"hari":null},"SYD":{"nama":"SYDNEY","draws":[["13:30","13:50"]],"hari":null},"SDYL":{"nama":"SYDNEY LOTTO","draws":[["13:30","13:50"]],"hari":null},"SG":{"nama":"SINGAPORE","draws":[["17:30","17:45"]],"hari":["Kamis","Minggu","Rabu","Sabtu","Senin"]},"OR1":{"nama":"OREGON 1","draws":[["02:45","03:00"]],"hari":null},"OR2":{"nama":"OREGON 2","draws":[["05:45","06:00"]],"hari":null},"OR3":{"nama":"OREGON 3","draws":[["08:45","09:00"]],"hari":null},"OR4":{"nama":"OREGON 4","draws":[["11:45","12:05"]],"hari":null},"GGM":{"nama":"GEORGIA MID","draws":[["23:15","23:30"]],"hari":null},"GEOE":{"nama":"GEORGIA EVE","draws":[["05:45","06:00"]],"hari":null},"GEON":{"nama":"GEORGIA NGT","draws":[["10:20","10:35"]],"hari":null},"MRM":{"nama":"MARYLAND MID","draws":[["23:15","23:30"]],"hari":null},"MLE":{"nama":"MARYLAND EVE","draws":[["06:40","06:55"]],"hari":null},"OHM":{"nama":"OHIO MID","draws":[["23:15","23:30"]],"hari":null},"OHIE":{"nama":"OHIO EVE","draws":[["06:15","06:30"]],"hari":null},"ORL":{"nama":"ORLANDO","draws":[["00:30","00:40"]],"hari":null},"NJM":{"nama":"NEW JERSEY MID","draws":[["23:45","00:00"]],"hari":null},"NJE":{"nama":"NEW JERSEY EVE","draws":[["09:45","10:00"]],"hari":null},"MICM":{"nama":"MICHIGAN MID","draws":[["23:45","00:00"]],"hari":null},"MICE":{"nama":"MICHIGAN EVE","draws":[["06:15","06:30"]],"hari":null},"TRK":{"nama":"TURKI","draws":[["01:10","01:25"]],"hari":null},"INDM":{"nama":"INDIANA MID","draws":[["00:05","00:20"]],"hari":null},"INDE":{"nama":"INDIANA EVE","draws":[["09:35","10:05"]],"hari":null},"KTM":{"nama":"KENTUCKY MID","draws":[["00:05","00:20"]],"hari":null},"KTE":{"nama":"KENTUCKY EVE","draws":[["09:45","10:00"]],"hari":null},"TENM":{"nama":"TENNESSE MID","draws":[["00:05","00:20"]],"hari":["Jumat","Kamis","Minggu","Rabu","Sabtu","Selasa"]},"TENE":{"nama":"TENNESSE EVE","draws":[["06:00","06:20"]],"hari":null},"TENMD":{"nama":"TENNESSE MOR","draws":[["21:05","21:20"]],"hari":["Jumat","Kamis","Rabu","Sabtu","Selasa","Senin"]},"BLRS":{"nama":"BELARUS","draws":[["01:20","01:30"]],"hari":null},"TXD":{"nama":"TEXAS DAY","draws":[["00:15","00:30"]],"hari":["Jumat","Kamis","Minggu","Rabu","Sabtu","Selasa"]},"TXSE":{"nama":"TEXAS EVE","draws":[["05:45","06:00"]],"hari":["Jumat","Kamis","Minggu","Rabu","Sabtu","Selasa"]},"TXSN":{"nama":"TEXAS NGT","draws":[["09:55","10:05"]],"hari":["Jumat","Kamis","Minggu","Rabu","Sabtu","Selasa"]},"TXSM":{"nama":"TEXAS MOR","draws":[["21:45","22:00"]],"hari":["Jumat","Kamis","Rabu","Sabtu","Selasa","Senin"]},"FLRM":{"nama":"FLORIDA MID","draws":[["00:15","00:30"]],"hari":null},"FLRE":{"nama":"FLORIDA EVE","draws":[["08:30","08:45"]],"hari":null},"ILM":{"nama":"ILLINOIS MID","draws":[["00:25","00:40"]],"hari":null},"ILE":{"nama":"ILLINOIS EVE","draws":[["09:05","09:40"]],"hari":null},"MISM":{"nama":"MISSOURI MID","draws":[["00:30","00:45"]],"hari":null},"MISE":{"nama":"MISSOURI EVE","draws":[["08:40","09:00"]],"hari":null},"DELD":{"nama":"DELAWARE DAY","draws":[["00:40","01:00"]],"hari":null},"DLWN":{"nama":"DELAWARE NGT","draws":[["06:40","06:55"]],"hari":null},"VIRD":{"nama":"VIRGINIA DAY","draws":[["00:40","01:00"]],"hari":null},"VIRN":{"nama":"VIRGINIA NGT","draws":[["09:40","10:00"]],"hari":null},"WDM":{"nama":"WASHINGTON MID","draws":[["00:40","01:00"]],"hari":null},"WDE":{"nama":"WASHINGTON EVE","draws":[["06:40","06:55"]],"hari":null},"RM":{"nama":"ROMA","draws":[["02:00","02:10"]],"hari":null},"NYM":{"nama":"NEWYORK MID","draws":[["01:10","01:30"]],"hari":null},"NYE":{"nama":"NEW YORK EVE","draws":[["09:10","09:30"]],"hari":null},"HELS":{"nama":"HELSINKI","draws":[["02:25","02:35"]],"hari":null},"CRD":{"nama":"CAROLINE DAY","draws":[["01:45","02:00"]],"hari":null},"CRE":{"nama":"CAROLINE EVE","draws":[["10:05","10:20"]],"hari":null},"PNM":{"nama":"PANAMA","draws":[["03:00","03:10"]],"hari":null},"YSLM":{"nama":"YERUSALEM","draws":[["03:20","03:30"]],"hari":null},"POL":{"nama":"POLANDIA","draws":[["03:40","03:50"]],"hari":null},"NWC":{"nama":"NEWCASTLE","draws":[["05:00","05:10"]],"hari":null},"DET":{"nama":"DETROIT","draws":[["05:50","06:00"]],"hari":null},"HWI":{"nama":"HAWAII","draws":[["06:00","06:10"]],"hari":null},"GDC":{"nama":"GOLDCOAST","draws":[["06:30","06:40"]],"hari":null},"TKY":{"nama":"TOKYO","draws":[["07:30","07:40"]],"hari":null},"PP":{"nama":"PAPUA","draws":[["08:10","08:20"]],"hari":null},"MXC":{"nama":"MEXICO","draws":[["09:15","09:25"]],"hari":null},"SZ":{"nama":"SHENZHEN","draws":[["09:40","09:50"]],"hari":null},"SHG":{"nama":"SHANGHAI","draws":[["10:00","10:10"]],"hari":null},"TW":{"nama":"TAIWAN","draws":[["20:30","20:45"]],"hari":null},"TWM":{"nama":"TAIWANMOR","draws":[["10:15","10:30"]],"hari":null},"HCM":{"nama":"HOCHIMINH","draws":[["11:00","11:10"]],"hari":null},"MNL":{"nama":"MANILA","draws":[["11:15","11:30"]],"hari":null},"BSN":{"nama":"BUSAN","draws":[["12:00","12:10"]],"hari":null},"VTM":{"nama":"VIETNAM","draws":[["12:15","12:25"]],"hari":null},"MND":{"nama":"MANADO","draws":[["13:00","13:10"]],"hari":null},"BLI":{"nama":"BOLAI","draws":[["14:10","14:20"]],"hari":null},"HNO":{"nama":"HANOI","draws":[["14:25","14:35"]],"hari":null},"PH":{"nama":"PHILIPHINE","draws":[["15:05","15:15"]],"hari":null},"CHN":{"nama":"CHINA","draws":[["15:15","15:30"]],"hari":null},"BJI":{"nama":"BEIJING","draws":[["16:10","16:20"]],"hari":null},"KR":{"nama":"KOREA","draws":[["16:30","16:40"]],"hari":null},"KK":{"nama":"KINGKONG","draws":[["17:00","17:10"],["23:30","23:40"]],"hari":null},"JP":{"nama":"JAPAN","draws":[["17:00","17:20"]],"hari":null},"DXB":{"nama":"DUBAI","draws":[["00:15","00:25"]],"hari":null},"KBJ":{"nama":"KAMBOJA","draws":[["19:00","19:15"]],"hari":null},"JJ":{"nama":"JEJU","draws":[["19:30","19:40"]],"hari":null},"PEN":{"nama":"PENANG","draws":[["20:00","20:10"]],"hari":null},"PCSO":{"nama":"PCSO","draws":[["19:45","20:15"]],"hari":["Jumat","Kamis","Rabu","Sabtu","Selasa","Senin"]},"LDN":{"nama":"LONDON","draws":[["21:00","21:10"]],"hari":null},"BLG":{"nama":"BULGARIA","draws":[["23:30","23:40"]],"hari":null},"CD":{"nama":"CAMBODIA","draws":[["11:35","11:50"]],"hari":null},"BUE":{"nama":"BULLSEYE","draws":[["12:50","13:10"]],"hari":null}};
 
@@ -665,6 +672,20 @@ function firebaseLoadSelectedData({auto=false}={}){
     return false;
   }
 
+  // GUARD — snapshot Firebase itu berisi SEMUA pasaran, jadi tiap kali SATU pasaran (manapun)
+  // di database update, listener ini tetap terpanggil ulang untuk SEMUA pasaran yang sedang
+  // dibuka user, walau data pasaran yang sedang dibuka tidak berubah sama sekali.
+  // Contoh: user buka periode ABC, lalu ada result baru masuk ke periode XYZ — tanpa guard ini,
+  // ABC ikut diproses ulang (reset/analyze/unlock Gen 1/2) padahal datanya persis sama.
+  //
+  // Hanya berlaku untuk pemanggilan OTOMATIS (auto=true, dari snapshot Firebase). Pemanggilan
+  // manual (klik dropdown ganti pasaran / klik ulang, auto=false) SELALU diproses — user memang
+  // sengaja meminta itu, terlepas datanya kebetulan sama atau tidak.
+  if(auto && firebaseLastProcessed.kode === kode && firebaseLastProcessed.data === entry.data){
+    firebaseRenderCountdown();
+    return false;
+  }
+
   // Tampilkan loading dulu, lalu kasih browser kesempatan menggambar overlay-nya (setTimeout 0ms)
   // SEBELUM proses berat (analyze + pipeline Formula X/Generate/Filter) jalan — proses ini semua
   // sinkron (blocking), jadi tanpa jeda ini overlay-nya tidak akan sempat kelihatan.
@@ -679,6 +700,7 @@ function firebaseLoadSelectedData({auto=false}={}){
       // PENTING: hanya baca. Tidak memanggil setSavedEntries(), API S2, /api/cron,
       // /api/sync, atau endpoint Neon apa pun.
       document.getElementById('dataInput').value = entry.data;
+      firebaseLastProcessed = { kode, data: entry.data };
       currentLoadedDataName = kode;
       document.getElementById('saveNameInput').value = kode;
       renderFilterLoadedName();
@@ -727,32 +749,41 @@ function firebaseLoadSelectedData({auto=false}={}){
       }
 
       // Validasi: semua data & pengaturan sudah sesuai preset?
+      // ── Cek #3 & #4 (Filter sudah menghasilkan data) HANYA relevan untuk Mode Auto/Semi Auto
+      // — cuma mode itu yang otomatis menjalankan pipeline penuh (Formula X→Generate→Filter)
+      // lewat runAutoPipelineAfterFormulaX(). Mode Normal SENGAJA tidak ada eksekusi otomatis
+      // (analyze() di atas cuma menghitung Formula X), jadi filterOut/filterCountOut memang
+      // wajar masih kosong di sini — bukan tanda proses gagal. Tanpa syarat mode ini, alert
+      // "proses belum selesai" selalu muncul palsu tiap ganti pasaran/refresh di Mode Normal. ──
+      const _isAutoOrSemi = (_mode === 'auto' || _mode === 'semi');
       showLoadingOverlay('Memvalidasi hasil...');
       await new Promise(r => setTimeout(r, 100)); // beri browser kesempatan render dulu
 
       const errors = [];
 
-      // 1) Data historis sudah termuat?
+      // 1) Data historis sudah termuat? (berlaku semua mode)
       if(!lastHistoryNumbers || !lastHistoryNumbers.length){
         errors.push('Data historis belum termuat');
       }
 
-      // 2) Ada preset aktif & data preset ditemukan?
+      // 2) Ada preset aktif & data preset ditemukan? (berlaku semua mode)
       if(_activePreset){
         const _allP = (typeof presetLoadAll === 'function') ? presetLoadAll() : {};
         if(!_allP[_activePreset]) errors.push('Preset "' + _activePreset + '" tidak ditemukan');
       }
 
-      // 3) Hasil filter ada? (filterCountOut >= 0 berarti pipeline + filter sudah jalan)
-      const filterCountEl = document.getElementById('filterCountOut');
-      const filterCount = filterCountEl ? parseInt(filterCountEl.textContent, 10) : -1;
-      if(isNaN(filterCount) || filterCount < 0) errors.push('Filter belum menghasilkan data');
+      if(_isAutoOrSemi){
+        // 3) Hasil filter ada? (filterCountOut >= 0 berarti pipeline + filter sudah jalan)
+        const filterCountEl = document.getElementById('filterCountOut');
+        const filterCount = filterCountEl ? parseInt(filterCountEl.textContent, 10) : -1;
+        if(isNaN(filterCount) || filterCount < 0) errors.push('Filter belum menghasilkan data');
 
-      // 4) filterOut sudah terisi & bukan pesan error kosong?
-      const filterOutEl = document.getElementById('filterOut');
-      const filterOutVal = filterOutEl ? filterOutEl.value.trim() : '';
-      if(!filterOutVal || filterOutVal.startsWith('(tidak ada hasil')){
-        errors.push('Hasil filter kosong — coba longgarkan kriteria filter');
+        // 4) filterOut sudah terisi & bukan pesan error kosong?
+        const filterOutEl = document.getElementById('filterOut');
+        const filterOutVal = filterOutEl ? filterOutEl.value.trim() : '';
+        if(!filterOutVal || filterOutVal.startsWith('(tidak ada hasil')){
+          errors.push('Hasil filter kosong — coba longgarkan kriteria filter');
+        }
       }
 
       firebaseSetBadge(auto ? 'LIVE · Firebase ✓' : 'Firebase ✓', true);
@@ -771,7 +802,9 @@ function firebaseLoadSelectedData({auto=false}={}){
         const fb = document.getElementById('modeFeedback') || document.getElementById('presetFeedback');
         if(fb){
           fb.style.color = 'var(--teal)';
-          fb.textContent = 'Data "' + kode + '" termuat — semua pengaturan & filter sudah sesuai preset, hasil siap disalin.';
+          fb.textContent = (_mode === 'auto' || _mode === 'semi')
+            ? 'Data "' + kode + '" termuat — semua pengaturan & filter sudah sesuai preset, hasil siap disalin.'
+            : 'Data "' + kode + '" termuat — Formula X sudah dihitung ulang.';
           setTimeout(() => { fb.textContent = ''; fb.style.color = ''; }, 6000);
         }
       } else {
