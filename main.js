@@ -11,6 +11,7 @@ const SETTINGS_DEFAULTS = {
   fxTrendN: '30',
   fxControlN: '10',
   fxOutN: '8',
+  fxTopN: '6',
   fxAutoFilterWorst: false,
   fxDataSource: 'default',
   // Jumlah & Selisih
@@ -165,6 +166,7 @@ const PRESET_FIELDS = [
   { id:'fxTrendN',   type:'select' },
   { id:'fxControlN', type:'select' },
   { id:'fxOutN',     type:'select' },
+  { id:'fxTopN',     type:'select' },
   { id:'fxAutoFilterWorst', type:'checkbox' },
   { id:'fxDataSource', type:'radio', name:'fxDataSource' },
   // Jumlah & Selisih
@@ -268,9 +270,14 @@ function presetCollectFields(){
 
 // Terapkan nilai preset ke semua kontrol, sambil trigger event change/input
 // supaya listener yang sudah ada (render ulang, dsb) tetap jalan seperti biasa.
-function presetApplyFields(data){
+// excludeIds (opsional): daftar id field PRESET_FIELDS yang SENGAJA dilewati — dipakai saat
+// pemanggil hanya butuh menyegarkan sebagian field (mis. Filter Pangkas Kombinasi di tengah
+// pipeline Mode Auto) tanpa ikut menimpa field lain yang sudah diisi kejadian real-time
+// (Tren N/Control N/Out N milik Gen 1/Gen 2 Auto%, lihat pemanggilnya di automode.js).
+function presetApplyFields(data, excludeIds){
   if(!data) return;
   PRESET_FIELDS.forEach(f=>{
+    if(excludeIds && excludeIds.includes(f.id)) return;
     if(!(f.id in data) || data[f.id] === null || data[f.id] === undefined) return;
     if(f.type === 'radio'){
       const target = document.querySelector(`input[name="${f.name}"][value="${data[f.id]}"]`);
@@ -319,7 +326,7 @@ function presetApplyGen2(data){
   FX_GEN2_SLOTS.forEach(sl=>{
     const s = fxGen2State[sl];
     // 1) buka kunci dulu
-    s.locked=false; s.pools=null; s.posLabels=null; s.fp='';
+    s.locked=false; s.pools=null; s.posLabels=null; s.fp=''; s.formulaInfo=null;
     const entry = data && data[sl];
     if(entry){
       // 2) set rule (Tren N/Control N/Out N seperti terakhir disimpan)
