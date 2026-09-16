@@ -359,11 +359,14 @@ function fxSearchBestStreakCombo(used, posLabels, controlN, trendN){
     if(idx === posLabels.length){
       const selFn = posLabels.map(label => picks[label]);
       const streak = fxJointStreak(selFn, posLabels, chronoNum, controlN, maxStreak);
+      // Sekalian hitung Pss% (akurasi keseluruhan gabungan) untuk baris ini — Tabel Kombinasi
+      // ACKE sekarang selalu tampilkan Status & Pss% bersamaan, apa pun tombol yang dipencet.
+      const r = fxJointAccuracy(selFn, posLabels, chronoNum, controlN);
       const pickedKeys = {};
       posLabels.forEach((label, i) => { pickedKeys[label] = selFn[i].key; });
-      allCombos.push({ picks: pickedKeys, streak });
+      allCombos.push({ picks: pickedKeys, streak, pct: r.pct, success: r.success, total: r.total });
       if(!best || streak > best.streak){
-        best = { picks: pickedKeys, streak, maxStreak };
+        best = { picks: pickedKeys, streak, maxStreak, pct: r.pct, success: r.success, total: r.total };
       }
       return;
     }
@@ -400,17 +403,25 @@ function fxSearchBestPosisiCombo(used, posLabels, controlN, trendN){
   });
   if(posLabels.some(label => !topByLabel[label].length)) return null;
 
+  // maxStreak dipakai untuk hitung kolom Status (streak gabungan) tiap baris, sama seperti
+  // batas yang dipakai fxSearchBestStreakCombo — supaya nilai Status di sini konsisten dengan
+  // nilai Status kalau nanti user pencet tombol Streak% pada kombinasi yang sama.
+  const maxStreakForRows = (trendN === Infinity) ? FX_STREAK_HARD_CAP : Math.min(trendN, FX_STREAK_HARD_CAP);
+
   let best = null; // { picks: {label:key}, pct, success, total }
   const allCombos = []; // dikumpulkan buat Tabel Kombinasi ACKE (semua kombinasi yang dicoba, belum diurut)
   (function recurse(idx, picks){
     if(idx === posLabels.length){
       const selFn = posLabels.map(label => picks[label]);
       const r = fxJointAccuracy(selFn, posLabels, chronoNum, controlN);
+      // Sekalian hitung Status (streak gabungan) untuk baris ini — Tabel Kombinasi ACKE sekarang
+      // selalu tampilkan Pss% & Status bersamaan, apa pun tombol yang dipencet.
+      const streak = fxJointStreak(selFn, posLabels, chronoNum, controlN, maxStreakForRows);
       const pickedKeys = {};
       posLabels.forEach((label, i) => { pickedKeys[label] = selFn[i].key; });
-      allCombos.push({ picks: pickedKeys, pct: r.pct, success: r.success, total: r.total });
+      allCombos.push({ picks: pickedKeys, pct: r.pct, success: r.success, total: r.total, streak });
       if(!best || r.pct > best.pct){
-        best = { picks: pickedKeys, pct: r.pct, success: r.success, total: r.total };
+        best = { picks: pickedKeys, pct: r.pct, success: r.success, total: r.total, streak };
       }
       return;
     }
@@ -427,7 +438,40 @@ function fxSearchBestPosisiCombo(used, posLabels, controlN, trendN){
   return best;
 }
 
-// Jalankan pencarian kandidat (controlN x trendN), skor tiap pasangan pakai fungsi `scoreFn`,
+// ── Pemilihan kandidat GEN 1 dari Tabel Kombinasi ACKE (dipakai tombol 🚀Auto% & 📊Posisi%) ──
+// `rows` harus sudah terurut DESCENDING berdasarkan pct (persis allCombos di atas). Aturan:
+//   1) Mulai dari tingkat Pss% TERTINGGI. Satu "tingkat" = satu nilai Pss% yang sama (dibulatkan
+//      1 desimal, sama seperti yang tertampil) — berapa pun jumlah baris kandidat di tingkat itu,
+//      tetap dihitung SATU tingkat.
+//   2) Kalau tingkat itu punya minimal 1 baris dengan Status (streak) > 0, ambil baris dengan
+//      Status TERTINGGI di tingkat itu sebagai kandidat.
+//   3) Kalau SEMUA baris di tingkat itu Status-nya 0x, turun ke tingkat Pss% berikutnya (lebih
+//      rendah) dan ulangi — maksimal 5 tingkat dicoba dari yang tertinggi.
+//   4) Kalau sampai 5 tingkat tidak ketemu satupun baris Status>0, return null — JANGAN diam-diam
+//      fallback ke Pss% tertinggi. Pemanggil wajib menampilkan pesan gagal ke user (lihat
+//      FX_GEN1_NO_CANDIDATE_MSG) dan TIDAK mengubah FX_SELECTED/Gen 1 yang sedang aktif.
+const FX_GEN1_MAX_TINGKAT = 5;
+const FX_GEN1_NO_CANDIDATE_MSG = 'Silakan ganti Tren, ctrl, dan out, karena setingan yang anda pilih tidak memenuhi syarat';
+function fxPickGen1Candidate(rows){
+  if(!rows || !rows.length) return null;
+  const roundPct = r => Math.round(r.pct * 10) / 10;
+  let i = 0, tingkat = 0;
+  while(i < rows.length && tingkat < FX_GEN1_MAX_TINGKAT){
+    const groupPct = roundPct(rows[i]);
+    let j = i;
+    let bestInGroup = null;
+    while(j < rows.length && roundPct(rows[j]) === groupPct){
+      if((rows[j].streak || 0) > 0 && (!bestInGroup || rows[j].streak > bestInGroup.streak)){
+        bestInGroup = rows[j];
+      }
+      j++;
+    }
+    if(bestInGroup) return bestInGroup;
+    i = j;
+    tingkat++;
+  }
+  return null;
+}
 // lalu kembalikan pasangan dengan skor rata-rata tertinggi antar posisi.
 function fxSearchBestN(used, posLabels, scoreFn){
   const chronoNum = used.slice().reverse();
@@ -637,7 +681,7 @@ document.querySelectorAll('input[name="fxDataSource"]').forEach(radio => {
 // ulang dari luar (mis. Mode Auto, lihat fxAutoLockGen1FromPreset di automode.js) tanpa lewat
 // klik tombol/spinner. Mengasumsikan lastHistoryNumbers/lastPosLabels sudah segar saat dipanggil.
 // Return true kalau berhasil set FX_SELECTED, false kalau data belum cukup.
-function fxRunAutoPercentCore(){
+function fxRunAutoPercentCore(silent){
   const status = document.getElementById('fxStatus');
 
   // Tahap 1: cari CNTRL+Tren terbaik pakai skor Wilson (persis logika lama tombol Wilson Score).
@@ -657,8 +701,20 @@ function fxRunAutoPercentCore(){
     status.textContent = `Kontrol N=${best.controlN}, Tren N=${best.trendN} — kombinasi posisi gagal dihitung.`;
     return false;
   }
+
+  FX_LAST_COMBO_TABLE = combo.all ? { mode: 'pct', rows: combo.all, posLabels: lastPosLabels.slice() } : null;
+
+  const chosen = fxPickGen1Candidate(combo.all);
+  if(!chosen){
+    renderFxComboTable();
+    status.style.color = 'var(--rose)';
+    status.textContent = FX_GEN1_NO_CANDIDATE_MSG;
+    if(!silent) alert(FX_GEN1_NO_CANDIDATE_MSG);
+    return false;
+  }
+
   lastPosLabels.forEach(label => {
-    const idx = (FX_RECOMMENDATIONS[label] || []).findIndex(r => r.key === combo.picks[label]);
+    const idx = (FX_RECOMMENDATIONS[label] || []).findIndex(r => r.key === chosen.picks[label]);
     if(idx >= 0){ FX_SELECTED[label] = idx; FX_TOUCHED[label] = true; }
   });
   renderFormulaX(lastPosLabels);
@@ -669,11 +725,10 @@ function fxRunAutoPercentCore(){
   if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
   if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
 
-  FX_LAST_COMBO_TABLE = combo.all ? { mode: 'pct', rows: combo.all, posLabels: lastPosLabels.slice() } : null;
   renderFxComboTable();
 
   status.style.color = 'var(--teal)';
-  status.textContent = `Auto%: Kontrol N=${best.controlN}, Tren N=${best.trendN} — Akurasi Keseluruhan ${combo.pct.toFixed(1)}% (${combo.success}/${combo.total}).`;
+  status.textContent = `Auto%: Kontrol N=${best.controlN}, Tren N=${best.trendN} — Pss% ${chosen.pct.toFixed(1)}% (${chosen.success}/${chosen.total}), Status ${chosen.streak}x.`;
   return true;
 }
 
@@ -702,9 +757,20 @@ document.getElementById('fxOptWalkBtn').addEventListener('click', () => {
       return;
     }
 
+    FX_LAST_COMBO_TABLE = combo.all ? { mode: 'pct', rows: combo.all, posLabels: lastPosLabels.slice() } : null;
+
+    const chosen = fxPickGen1Candidate(combo.all);
+    if(!chosen){
+      renderFxComboTable();
+      status.style.color = 'var(--rose)';
+      status.textContent = FX_GEN1_NO_CANDIDATE_MSG;
+      alert(FX_GEN1_NO_CANDIDATE_MSG);
+      return;
+    }
+
     // Arahkan radio tiap posisi ke formula pemenang kombinasi (bukan cuma rank #1 independen).
     lastPosLabels.forEach(label => {
-      const idx = (FX_RECOMMENDATIONS[label] || []).findIndex(r => r.key === combo.picks[label]);
+      const idx = (FX_RECOMMENDATIONS[label] || []).findIndex(r => r.key === chosen.picks[label]);
       if(idx >= 0){ FX_SELECTED[label] = idx; FX_TOUCHED[label] = true; }
     });
     renderFormulaX(lastPosLabels);
@@ -715,11 +781,10 @@ document.getElementById('fxOptWalkBtn').addEventListener('click', () => {
     if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
     if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
 
-    FX_LAST_COMBO_TABLE = combo.all ? { mode: 'pct', rows: combo.all, posLabels: lastPosLabels.slice() } : null;
     renderFxComboTable();
 
     status.style.color = 'var(--teal)';
-    status.textContent = `Posisi%: Akurasi Keseluruhan ${combo.pct.toFixed(1)}% (${combo.success}/${combo.total}).`;
+    status.textContent = `Posisi%: Pss% ${chosen.pct.toFixed(1)}% (${chosen.success}/${chosen.total}), Status ${chosen.streak}x.`;
   });
 });
 
@@ -1153,17 +1218,25 @@ function renderFxComboTable(){
   renderFxStreakDist();
   const wrap = document.getElementById('fxComboWrap');
   const body = document.getElementById('fxComboTableBody');
-  const head = document.getElementById('fxComboStatusHead');
-  if(!wrap || !body || !head) return;
+  const head2 = document.getElementById('fxComboCol2Head');
+  const head3 = document.getElementById('fxComboCol3Head');
+  if(!wrap || !body || !head2 || !head3) return;
 
   const t = FX_LAST_COMBO_TABLE;
   if(!t || !t.rows || !t.rows.length){
-    body.innerHTML = '<tr><td colspan="2" class="emptynote" style="padding:10px 8px;">Belum ada data — klik 🚀Auto%, 📊Posisi%, atau 🔥Streak% di atas dulu.</td></tr>';
-    head.textContent = 'Status';
+    body.innerHTML = '<tr><td colspan="3" class="emptynote" style="padding:10px 8px;">Belum ada data — klik 🚀Auto%, 📊Posisi%, atau 🔥Streak% di atas dulu.</td></tr>';
+    head2.textContent = 'Status';
+    head3.textContent = 'Pss%';
     return;
   }
 
-  head.textContent = t.mode === 'streak' ? 'Status (Streak)' : 'Status (%)';
+  // Kedua metrik (Status = streak gabungan, Pss% = posisi% gabungan) SELALU dihitung bareng di
+  // setiap baris (lihat fxSearchBestStreakCombo/fxSearchBestPosisiCombo) — yang beda cuma urutan
+  // tampil kolomnya, mengikuti tombol terakhir yang dipencet:
+  // 🔥 Streak% -> Status dulu, baru Pss%.  🚀 Auto% / 📊 Posisi% -> Pss% dulu, baru Status.
+  const streakFirst = t.mode === 'streak';
+  head2.textContent = streakFirst ? 'Status' : 'Pss%';
+  head3.textContent = streakFirst ? 'Pss%' : 'Status';
 
   const rows = t.rows;
   const TOP_N = 25, BOTTOM_N = 25;
@@ -1174,14 +1247,17 @@ function renderFxComboTable(){
 
   const rowHtml = r => {
     const name = fxComboRowName(r.picks, t.posLabels);
-    const val = t.mode === 'streak' ? (r.streak + 'x') : (r.pct.toFixed(1) + '%');
+    const statusVal = (r.streak || 0) + 'x';
+    const pssVal = (typeof r.pct === 'number' ? r.pct.toFixed(1) : '0.0') + '%';
+    const col2 = streakFirst ? statusVal : pssVal;
+    const col3 = streakFirst ? pssVal : statusVal;
     const active = fxComboRowIsActive(r.picks, t.posLabels);
-    return `<tr class="fxComboRow${active ? ' selected' : ''}" data-picks='${JSON.stringify(r.picks)}'><td>${name}</td><td>${val}</td></tr>`;
+    return `<tr class="fxComboRow${active ? ' selected' : ''}" data-picks='${JSON.stringify(r.picks)}'><td>${name}</td><td>${col2}</td><td>${col3}</td></tr>`;
   };
 
   let html = top.map(rowHtml).join('');
   if(hiddenCount > 0){
-    html += `<tr class="fxComboSep"><td colspan="2">⋯ ${hiddenCount} kombinasi lainnya disembunyikan ⋯</td></tr>`;
+    html += `<tr class="fxComboSep"><td colspan="3">⋯ ${hiddenCount} kombinasi lainnya disembunyikan ⋯</td></tr>`;
   }
   html += bottom.map(rowHtml).join('');
   body.innerHTML = html;
