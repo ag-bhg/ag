@@ -13,6 +13,11 @@ setupSectionToggle('fxAutoGenToggle', 'fxAutoGenWrap', 'fxAutoGenToggleIcon');
 // ── State Gen 1 ──
 let fxGen1Locked = false;
 let fxGen1LockedPools = null;
+// Diisi fxAutoLockGen1FromPreset() saat gagal mengunci Gen 1 KARENA fxRunAutoPercentCore() tidak
+// menemukan kandidat (aturan Pss%+Status di formula.js) — dibaca oleh runAutoPipelineAfterFormulaX()
+// supaya pesan yang ditampilkan ke user SPESIFIK untuk kasus ini, bukan pesan generik "Preset tidak
+// punya pilihan Formula X yang cocok". null berarti kegagalan (kalau ada) disebabkan hal lain.
+let fxGen1AutoNoCandidateMsg = null;
 
 // ── Daftar angka hasil klik "Status Streak Seluruh Kombinasi" (di menu Formula X) ──
 // SENGAJA terpisah total dari sistem Lock Gen 1 (fxGen1Locked/fxGen1LockedPools) — TIDAK
@@ -538,6 +543,7 @@ function renderGen2LockUI(slot){
 // fxBuildGen1Pools — supaya FX_SELECTED sudah pasti sesuai preset saat pool Gen 1 dihitung,
 // bukan diam-diam kebaca rank #1 bawaan reset tadi.
 async function fxAutoLockGen1FromPreset(maxAttempts = 3, delayMs = 300){
+  fxGen1AutoNoCandidateMsg = null; // reset dulu tiap kali dipanggil — lihat komentar deklarasinya di atas
   // 1) Masih terkunci? Buka dulu — supaya isi Gen 1 selalu dihitung bersih dari preset terkini,
   // bukan menimpa/bercampur dengan pool lama yang masih tersimpan.
   if(fxGen1Locked){
@@ -567,10 +573,21 @@ async function fxAutoLockGen1FromPreset(maxAttempts = 3, delayMs = 300){
   // yang barusan dipasang preset dengan hasil optimizer Auto% (Wilson -> Posisi%), dihitung ULANG
   // setiap siklus ini supaya formula per posisi selalu ikut akurasi data terbaru, bukan preset.
   // Kalau "manual" (default lama, arti sebenarnya "ikuti Preset") -> tidak ada perubahan sama sekali.
+  //
+  // Kalau fxRunAutoPercentCore() GAGAL nemuin kandidat (aturan Pss%+Status di formula.js sampai
+  // 5 tingkat tidak ketemu Status>0x) -> JANGAN lanjut ke fxBuildGen1Pools/lock sama sekali,
+  // karena FX_SELECTED di titik ini basi/fallback (tidak diubah oleh fxRunAutoPercentCore saat
+  // gagal) — kalau tetap dipaksa lock, Gen 1 akan ke-lock diam-diam pakai pilihan yang bukan hasil
+  // optimasi valid. STOP di sini, tandai fxGen1AutoNoCandidateMsg supaya pipeline pemanggil kasih
+  // pesan yang spesifik ke user, bukan pesan generik "Preset tidak punya Formula X yang cocok".
   const gen1SourceEl = document.getElementById('autoGen1SourceSelect');
   const gen1Source = gen1SourceEl ? gen1SourceEl.value : 'manual';
   if(gen1Source === 'auto' && typeof fxRunAutoPercentCore === 'function'){
-    fxRunAutoPercentCore();
+    const autoOk = fxRunAutoPercentCore(true); // silent=true — alert generiknya di-skip, biar tidak dobel dengan pesan spesifik di bawah
+    if(!autoOk){
+      fxGen1AutoNoCandidateMsg = 'Silakan ganti preset atau ganti mode, karena di mode ini tidak mendapatkan angka terbaik.';
+      return false;
+    }
   }
 
   const pools = fxBuildGen1Pools(lastPosLabels, lastHistoryNumbers); // ikut FX_SELECTED (Auto% atau Preset)
@@ -1137,9 +1154,11 @@ async function runAutoPipelineAfterFormulaX(){
   // jangan diam-diam lanjut generate pakai pool live Gen 1.
   if(!fxGen1Locked){
     const _modeNow = (typeof getAppMode === 'function') ? getAppMode() : 'normal';
-    const msg = (_modeNow === 'semi')
-      ? 'Pipeline Semi Auto dihentikan — Gen 1 belum terkunci. Isi ulang "Angka Bahan Gen 1" lalu aktifkan Semi Auto lagi.'
-      : 'Pipeline Mode Auto dihentikan — Gen 1 gagal dikunci otomatis dari Preset (kemungkinan Preset Aktif tidak punya pilihan Formula X yang cocok untuk posisi saat ini, atau data pasaran belum sinkron). Cek Preset Aktif / pilihan Formula X per posisi, lalu coba lagi.';
+    const msg = fxGen1AutoNoCandidateMsg
+      ? fxGen1AutoNoCandidateMsg
+      : (_modeNow === 'semi'
+        ? 'Pipeline Semi Auto dihentikan — Gen 1 belum terkunci. Isi ulang "Angka Bahan Gen 1" lalu aktifkan Semi Auto lagi.'
+        : 'Pipeline Mode Auto dihentikan — Gen 1 gagal dikunci otomatis dari Preset (kemungkinan Preset Aktif tidak punya pilihan Formula X yang cocok untuk posisi saat ini, atau data pasaran belum sinkron). Cek Preset Aktif / pilihan Formula X per posisi, lalu coba lagi.');
     document.getElementById('modeFeedback').textContent = msg;
     alert(msg);
     return 'gen1-not-locked';
