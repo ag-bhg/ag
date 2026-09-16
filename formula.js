@@ -245,7 +245,13 @@ function wilsonLowerBound(hit, total, z){
 // ---------- OPTIMIZER "Posisi%" ----------
 // Langsung cari kombinasi formula terbaik lintas posisi A/C/K/E — CNTRL dan Tren TETAP dipakai
 // apa adanya dari dropdown yang aktif sekarang (tidak ikut dicari sama sekali).
-const FX_POSISI_TOP_N = 6; // jumlah kandidat teratas per posisi yang dikombinasikan — tetap, tidak configurable
+// Jumlah kandidat teratas per posisi yang dikombinasikan — dulu tetap 6, sekarang bisa dipilih
+// lewat dropdown "BCT :" (#fxTopN, pilihan 6-12, default 6) di atas tombol Hitung Ulang.
+function fxGetPosisiTopN(){
+  const el = document.getElementById('fxTopN');
+  const n = el ? parseInt(el.value, 10) : 6;
+  return (Number.isFinite(n) && n > 0) ? n : 6;
+}
 
 // Hitung "Akurasi Keseluruhan" (gabungan — wajib benar BERSAMAAN di semua posisi pada baris yang
 // sama) untuk satu kombinasi formula tertentu. Logikanya identik dengan renderFxBacktestTable,
@@ -268,7 +274,113 @@ function fxJointAccuracy(selFn, posLabels, chronoNum, controlN){
   return { success, total, pct: total > 0 ? (success / total * 100) : 0 };
 }
 
-// Tahap 2: di Tren pemenang (Tahap 1), ambil TOP-6 formula tiap posisi (akurasi individual
+// ---------- STREAK% — cari kombinasi formula dengan SUKSES BERUNTUN terpanjang dari baris
+// TERBARU mundur ke belakang (BUKAN akurasi total/Wilson — murni Control N apa adanya dari
+// dropdown, tanpa optimasi Tren N sama sekali, sejalan dengan cara kerja tabel backtest). ----------
+//
+// ATURAN INTI (beda total dari Posisi%/Auto%): kalau baris PALING ATAS (paling baru) sudah
+// GAGAL, streak formula itu = 0 — walau baris ke-2 dst di bawahnya sukses panjang, TETAP
+// diabaikan/tidak dihitung. Jadi ini bukan "streak terpanjang di manapun dalam riwayat",
+// tapi "sudah berapa lama sukses TANPA PUTUS sampai sekarang".
+const FX_STREAK_MIN = 3;      // di bawah ini dianggap tidak layak/tidak valid
+const FX_STREAK_HARD_CAP = 100; // batas mutlak (dipakai kalau Tren N = "semua"/tak terhingga, supaya tidak looping ribuan baris)
+
+// Streak individual 1 formula di 1 posisi — dipakai untuk menyaring kandidat top-N tiap posisi
+// sebelum dikombinasikan (sama seperti fxTrendAccuracy dipakai menyaring FX_POSISI_TOP_N).
+// maxStreak = batas atas hitung mundur, diambil dari Tren N yang sedang aktif di dropdown.
+function fxStreakAccuracy(formula, chronoNum, controlN, posIdx, maxStreak){
+  const minNeeded = (formula.kind === 'bhg' || formula.kind === 'pk') ? FX_BHG_PK_MIN : Math.min(controlN, 1);
+  let streak = 0;
+  for(let i = chronoNum.length - 1; i >= 1 && streak < maxStreak; i--){
+    const available = chronoNum.slice(0, i);
+    if(available.length < minNeeded) break;
+    const windowNewestFirst = available.slice().reverse();
+    let pools;
+    try{ pools = formula.fn(windowNewestFirst); }catch(e){ break; }
+    const target = chronoNum[i];
+    const hit = !!(pools[posIdx] && pools[posIdx].includes(target[posIdx]));
+    if(!hit) break; // baris ini (atau baris paling atas kalau i = chronoNum.length-1) GAGAL -> stop
+    streak++;
+  }
+  return streak;
+}
+
+// Streak GABUNGAN (joint) — baris dihitung sukses hanya kalau SEMUA posisi OK bareng di baris
+// yang sama. Logikanya identik dengan fxJointAccuracy, tapi berhenti di GAGAL pertama (dari
+// baris terbaru) alih-alih menjumlah semua transisi. Dipakai untuk menilai 1 kombinasi lengkap
+// (A+C+K+E) yang sudah dipilih dari hasil pencarian kombinasi di bawah.
+function fxJointStreak(selFn, posLabels, chronoNum, controlN, maxStreak){
+  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (controlN === Infinity ? 1 : controlN)));
+  let streak = 0;
+  for(let i = chronoNum.length - 1; i >= minNeeded && streak < maxStreak; i--){
+    const windowNewestFirst = chronoNum.slice(0, i).slice().reverse();
+    const target = chronoNum[i];
+    let ok = true;
+    for(let p = 0; p < posLabels.length; p++){
+      let pools;
+      try{ pools = selFn[p].fn(windowNewestFirst); }catch(e){ pools = null; }
+      if(!(pools && pools[p] && pools[p].includes(target[p]))){ ok = false; break; }
+    }
+    if(!ok) break; // baris ini GAGAL -> stop, streak final
+    streak++;
+  }
+  return streak;
+}
+
+// Cari kombinasi formula (lintas posisi) dengan Streak Gabungan terpanjang. Pola pencarian SAMA
+// PERSIS seperti fxSearchBestPosisiCombo (Posisi%): ambil TOP-N kandidat tiap posisi dulu (di
+// sini disaring pakai streak individual, bukan akurasi), baru coba SEMUA kombinasi lintas posisi
+// dan pilih yang Streak Gabungan-nya paling panjang — karena streak individual tinggi per posisi
+// TIDAK menjamin streak gabungan tinggi (harus OK bersamaan di baris yang sama).
+//
+// CNTRL dan Tren N dipakai APA ADANYA dari dropdown yang sedang aktif (persis seperti tombol
+// Posisi%) — TIDAK ada pencarian/optimasi N di sini, dan TIDAK melibatkan Wilson sama sekali.
+// Tren N di sini berperan sebagai batas atas ("maksimal cari sampai berapa baris ke belakang"),
+// bukan sebagai jumlah sampel akurasi seperti pada Posisi%/Auto%.
+function fxSearchBestStreakCombo(used, posLabels, controlN, trendN){
+  const chronoNum = used.slice().reverse();
+  const maxStreak = (trendN === Infinity) ? FX_STREAK_HARD_CAP : Math.min(trendN, FX_STREAK_HARD_CAP);
+  const formulas = fxBuildFormulaList(posLabels, controlN);
+  const topByLabel = {};
+  posLabels.forEach((label, idx) => {
+    const arr = [];
+    formulas.forEach(f => {
+      const streak = fxStreakAccuracy(f, chronoNum, controlN, idx, maxStreak);
+      arr.push({ key: f.key, fn: f.fn, kind: f.kind, streak });
+    });
+    arr.sort((a, b) => b.streak - a.streak); // DESCENDING — streak individual terpanjang duluan
+    topByLabel[label] = arr.slice(0, fxGetPosisiTopN());
+  });
+  if(posLabels.some(label => !topByLabel[label].length)) return null;
+
+  let best = null; // { picks: {label:key}, streak, maxStreak }
+  const allCombos = []; // dikumpulkan buat Tabel Kombinasi ACKE (semua kombinasi yang dicoba, belum diurut)
+  (function recurse(idx, picks){
+    if(idx === posLabels.length){
+      const selFn = posLabels.map(label => picks[label]);
+      const streak = fxJointStreak(selFn, posLabels, chronoNum, controlN, maxStreak);
+      const pickedKeys = {};
+      posLabels.forEach((label, i) => { pickedKeys[label] = selFn[i].key; });
+      allCombos.push({ picks: pickedKeys, streak });
+      if(!best || streak > best.streak){
+        best = { picks: pickedKeys, streak, maxStreak };
+      }
+      return;
+    }
+    const label = posLabels[idx];
+    topByLabel[label].forEach(cand => {
+      picks[label] = cand;
+      recurse(idx + 1, picks);
+    });
+  })(0, {});
+  if(best){
+    allCombos.sort((a, b) => b.streak - a.streak); // DESCENDING — dipakai Tabel Kombinasi ACKE
+    best.all = allCombos;
+  }
+  return best;
+}
+
+// Tahap 2: di Tren pemenang (Tahap 1), ambil TOP-N (BCT) formula tiap posisi (akurasi individual
 // tertinggi), lalu coba SEMUA kombinasi lintas posisi (6^jumlah posisi) — pilih kombinasi dengan
 // Akurasi Keseluruhan paling tinggi. Akurasi individual tinggi per posisi TIDAK menjamin Akurasi
 // Keseluruhan tinggi (posisi-posisi itu harus benar BERSAMAAN di baris yang sama), makanya perlu
@@ -284,18 +396,20 @@ function fxSearchBestPosisiCombo(used, posLabels, controlN, trendN){
       if(r.total > 0) arr.push({ key: f.key, fn: f.fn, kind: f.kind, pct: r.pct });
     });
     arr.sort((a, b) => b.pct - a.pct);
-    topByLabel[label] = arr.slice(0, FX_POSISI_TOP_N);
+    topByLabel[label] = arr.slice(0, fxGetPosisiTopN());
   });
   if(posLabels.some(label => !topByLabel[label].length)) return null;
 
   let best = null; // { picks: {label:key}, pct, success, total }
+  const allCombos = []; // dikumpulkan buat Tabel Kombinasi ACKE (semua kombinasi yang dicoba, belum diurut)
   (function recurse(idx, picks){
     if(idx === posLabels.length){
       const selFn = posLabels.map(label => picks[label]);
       const r = fxJointAccuracy(selFn, posLabels, chronoNum, controlN);
+      const pickedKeys = {};
+      posLabels.forEach((label, i) => { pickedKeys[label] = selFn[i].key; });
+      allCombos.push({ picks: pickedKeys, pct: r.pct, success: r.success, total: r.total });
       if(!best || r.pct > best.pct){
-        const pickedKeys = {};
-        posLabels.forEach((label, i) => { pickedKeys[label] = selFn[i].key; });
         best = { picks: pickedKeys, pct: r.pct, success: r.success, total: r.total };
       }
       return;
@@ -306,6 +420,10 @@ function fxSearchBestPosisiCombo(used, posLabels, controlN, trendN){
       recurse(idx + 1, picks);
     });
   })(0, {});
+  if(best){
+    allCombos.sort((a, b) => b.pct - a.pct); // DESCENDING — dipakai Tabel Kombinasi ACKE
+    best.all = allCombos;
+  }
   return best;
 }
 
@@ -438,6 +556,7 @@ function fxRunOptimizer(label, computeFn){
   const buttons = [
     document.getElementById('fxOptWilsonBtn'),
     document.getElementById('fxOptWalkBtn'),
+    document.getElementById('fxOptStreakBtn'),
     document.getElementById('fxRecalcBtn')
   ];
   buttons.forEach(b => b.disabled = true);
@@ -530,7 +649,7 @@ function fxRunAutoPercentCore(){
   }
   fxApplyOptimizedN(best, 'Wilson Score'); // set dropdown CNTRL/Tren + computeFormulaX ulang
 
-  // Tahap 2: begitu Tahap 1 selesai, lanjut cari kombinasi top-6 posisi (persis logika tombol
+  // Tahap 2: begitu Tahap 1 selesai, lanjut cari kombinasi top-N (BCT) posisi (persis logika tombol
   // Posisi%) — tapi CNTRL/Tren-nya dari hasil Wilson di Tahap 1, bukan dari dropdown lama.
   const combo = fxSearchBestPosisiCombo(lastHistoryNumbers, lastPosLabels, best.controlN, best.trendN);
   if(!combo){
@@ -549,6 +668,9 @@ function fxRunAutoPercentCore(){
   fxApplyToGenerator(true);
   if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
   if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
+
+  FX_LAST_COMBO_TABLE = combo.all ? { mode: 'pct', rows: combo.all, posLabels: lastPosLabels.slice() } : null;
+  renderFxComboTable();
 
   status.style.color = 'var(--teal)';
   status.textContent = `Auto%: Kontrol N=${best.controlN}, Tren N=${best.trendN} — Akurasi Keseluruhan ${combo.pct.toFixed(1)}% (${combo.success}/${combo.total}).`;
@@ -571,7 +693,7 @@ document.getElementById('fxOptWalkBtn').addEventListener('click', () => {
     const controlN = controlNRaw === 'all' ? Infinity : parseInt(controlNRaw, 10);
     const trendN = trendNRaw === 'all' ? Infinity : parseInt(trendNRaw, 10);
 
-    // Langsung cari kombinasi top-6 per posisi dengan Akurasi Keseluruhan tertinggi — CNTRL &
+    // Langsung cari kombinasi top-N (BCT) per posisi dengan Akurasi Keseluruhan tertinggi — CNTRL &
     // Tren dipakai apa adanya dari dropdown, sama sekali tidak diubah/dicari.
     const combo = fxSearchBestPosisiCombo(lastHistoryNumbers, lastPosLabels, controlN, trendN);
     if(!combo){
@@ -593,12 +715,98 @@ document.getElementById('fxOptWalkBtn').addEventListener('click', () => {
     if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
     if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
 
+    FX_LAST_COMBO_TABLE = combo.all ? { mode: 'pct', rows: combo.all, posLabels: lastPosLabels.slice() } : null;
+    renderFxComboTable();
+
     status.style.color = 'var(--teal)';
     status.textContent = `Posisi%: Akurasi Keseluruhan ${combo.pct.toFixed(1)}% (${combo.success}/${combo.total}).`;
   });
 });
 
+// ── Tombol Streak% — cari kombinasi formula dengan SUKSES BERUNTUN terpanjang dari baris
+// TERBARU (lihat fxSearchBestStreakCombo di atas untuk aturan lengkap: baris teratas GAGAL =
+// streak 0, tidak peduli seberapa panjang streak di baris-baris bawahnya). ──
+document.getElementById('fxOptStreakBtn').addEventListener('click', () => {
+  fxRefreshHistoryIfTerbaru();
+  if(!lastHistoryNumbers.length || !lastPosLabels) return;
+  fxRunOptimizer('Streak%', () => {
+    const status = document.getElementById('fxStatus');
+    const controlNRaw = document.getElementById('fxControlN').value;
+    const trendNRaw = document.getElementById('fxTrendN').value;
+    const controlN = controlNRaw === 'all' ? Infinity : parseInt(controlNRaw, 10);
+    const trendN = trendNRaw === 'all' ? Infinity : parseInt(trendNRaw, 10);
+    const controlNDisplay = controlN === Infinity ? 'semua' : controlN;
+    const trendNDisplay = trendN === Infinity ? 'semua' : trendN;
+
+    const combo = fxSearchBestStreakCombo(lastHistoryNumbers, lastPosLabels, controlN, trendN);
+    if(!combo){
+      FX_LAST_STREAK_RESULT = null;
+      FX_LAST_COMBO_TABLE = null;
+      renderFxComboTable();
+      status.style.color = 'var(--rose)';
+      status.textContent = 'Data historis belum cukup untuk mencari kombinasi Streak.';
+      renderFxStreakStatus();
+      return;
+    }
+
+    // Tetap tampilkan Tabel Kombinasi ACKE (semua kombinasi yang dicoba) walau nanti di bawah
+    // ternyata tidak ada yang lolos ambang FX_STREAK_MIN — biar user tetap bisa lihat & pilih
+    // manual dari tabel kalau mau, meski radio otomatis dialihkan ke akurasi tertinggi.
+    FX_LAST_COMBO_TABLE = combo.all ? { mode: 'streak', rows: combo.all, posLabels: lastPosLabels.slice() } : null;
+
+    if(combo.streak < FX_STREAK_MIN){
+      // Tidak ada kombinasi dengan baris teratas yang sedang sukses beruntun (minimal
+      // FX_STREAK_MIN) \u2014 sesuai aturan, JANGAN pasang kombinasi ini. Jatuhkan ke rank #1
+      // akurasi tertinggi tiap posisi (persis default computeFormulaX/Hitung Ulang), lalu
+      // beri tahu user secara eksplisit lewat alert + status + kotak di bawah ANGKA HASIL TREN.
+      lastPosLabels.forEach(label => {
+        FX_SELECTED[label] = (FX_RECOMMENDATIONS[label] || []).length ? 0 : null;
+        FX_TOUCHED[label] = false;
+      });
+      FX_LAST_STREAK_RESULT = { notFound: true, controlNDisplay, trendNDisplay };
+      renderFormulaX(lastPosLabels);
+      renderFxTrendNumbers(lastPosLabels, lastHistoryNumbers); // ini juga memanggil renderFxStreakStatus()
+      renderTopPosisi(lastPosLabels, lastHistoryNumbers);
+      renderFxBacktestTable(lastPosLabels, lastHistoryNumbers);
+      fxApplyToGenerator(true);
+      if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
+      if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
+      renderFxComboTable();
+
+      status.style.color = 'var(--rose)';
+      status.textContent = `Streak%: tidak ada kombinasi valid (belum ada yang sukses beruntun \u2265${FX_STREAK_MIN}x dari baris terbaru) \u2014 dialihkan ke akurasi tertinggi.`;
+      alert(`Tidak ada formula/kombinasi yang valid untuk Streak% (minimal ${FX_STREAK_MIN}x sukses beruntun dari baris terbaru).\n\nDialihkan otomatis ke pilihan akurasi tertinggi per posisi.`);
+      return;
+    }
+
+    FX_LAST_STREAK_RESULT = { combo, controlNDisplay, trendNDisplay, posLabels: lastPosLabels.slice() };
+    lastPosLabels.forEach(label => {
+      const idx = (FX_RECOMMENDATIONS[label] || []).findIndex(r => r.key === combo.picks[label]);
+      if(idx >= 0){ FX_SELECTED[label] = idx; FX_TOUCHED[label] = true; }
+    });
+    renderFormulaX(lastPosLabels);
+    renderFxTrendNumbers(lastPosLabels, lastHistoryNumbers); // ini juga memanggil renderFxStreakStatus()
+    renderTopPosisi(lastPosLabels, lastHistoryNumbers);
+    renderFxBacktestTable(lastPosLabels, lastHistoryNumbers);
+    fxApplyToGenerator(true);
+    if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
+    if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
+    renderFxComboTable();
+
+    status.style.color = 'var(--teal)';
+    status.textContent = `Streak%: sukses beruntun ${combo.streak}x dari baris terbaru (gabungan semua posisi).`;
+  });
+});
+
 function computeFormulaX(used, posLabels){
+  // Data/pengaturan baru — hasil pencarian Streak% sebelumnya (kalau ada) sudah tidak relevan
+  // lagi (dihitung dari data lama), jadi status di bawah ANGKA HASIL TREN dikosongkan dulu di
+  // sini. Kalau user pakai Streak% lagi setelah ini, kotaknya akan terisi ulang otomatis.
+  FX_LAST_STREAK_RESULT = null;
+  // Sama halnya, Tabel Kombinasi ACKE (hasil Auto%/Posisi%/Streak% sebelumnya) juga sudah tidak
+  // relevan lagi begitu data/pengaturan berubah — kosongkan, tunggu user pencet salah satu
+  // tombol lagi.
+  FX_LAST_COMBO_TABLE = null;
   FX_OUT_N = parseInt(document.getElementById('fxOutN').value, 10) || 8;
   const controlNRaw = document.getElementById('fxControlN').value;
   const trendNRaw = document.getElementById('fxTrendN').value;
@@ -646,6 +854,7 @@ function computeFormulaX(used, posLabels){
 
   // Otomatis isi Generator & Kombinasi Acak begitu pilihan (radio) diarahkan ke varian teratas — tanpa perlu klik "ANGKA TOP".
   fxApplyToGenerator(true);
+  renderFxComboTable();
 }
 
 function renderFormulaX(posLabels){
@@ -680,6 +889,7 @@ function renderFormulaX(posLabels){
         // render ulang saat radio Formula X diganti.
         if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
         if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
+        renderFxComboTable(); // radio digeser manual -> highlight baris tabel kombinasi ikut update
       });
       row.appendChild(radio);
       const txt = document.createElement('span');
@@ -705,9 +915,309 @@ function renderFormulaX(posLabels){
 // Tampilkan 3 varian teratas tiap posisi sebagai pool 8 digit langsung (bukan persentase) — "ANGKA HASIL TREN".
 // Varian yang sedang dipilih lewat radio (FX_SELECTED) selalu ikut tampil di sini: kalau dia belum termasuk
 // 3 teratas, dia menggantikan urutan terakhir supaya angka yang lagi dipakai selalu kelihatan di daftar ini.
+// Hasil pencarian Streak% TERAKHIR (null kalau belum pernah dijalankan, atau sudah tidak berlaku lagi
+// karena data/posisi berubah) — dipakai renderFxStreakStatus() untuk menampilkan status pencarian di
+// bawah "ANGKA HASIL TREN". Direset ke null tiap kali computeFormulaX() jalan (data/pengaturan baru),
+// supaya status lama tidak nyangkut menampilkan hasil yang sudah tidak relevan.
+let FX_LAST_STREAK_RESULT = null; // { combo, controlN, trendN, posLabels, notFound }
+
+// Hasil terakhir Auto%/Posisi%/Streak% dalam bentuk SEMUA kombinasi (bukan cuma 1 yang terbaik),
+// dipakai render Tabel Kombinasi ACKE (#fxComboTableBody). null = belum pernah dipencet /
+// sudah tidak relevan lagi (lihat reset di computeFormulaX()).
+// { mode: 'pct' | 'streak', rows: [{picks,pct,success,total}] atau [{picks,streak}] (sudah terurut DESC), posLabels }
+let FX_LAST_COMBO_TABLE = null;
+
+// Render status pencarian Streak% (kombinasi + panjang streak, atau pesan "tidak ditemukan") tepat
+// di bawah "ANGKA HASIL TREN" (#fxStreakStatusBox). Dipanggil ulang tiap kali renderFxTrendNumbers()
+// jalan, supaya status tetap tampil konsisten walau user pindah tab/scroll, bukan cuma sesaat setelah
+// klik tombol Streak%.
+function renderFxStreakStatus(){
+  const box = document.getElementById('fxStreakStatusBox');
+  if(!box) return;
+  const r = FX_LAST_STREAK_RESULT;
+  if(!r){ box.innerHTML = ''; return; }
+
+  if(r.notFound){
+    box.innerHTML = `<div class="hint" style="border:1px solid var(--rose); border-radius:8px; padding:8px 10px; color:var(--rose);">
+      🔥 <b>Streak%</b>: tidak ada kombinasi yang sukses beruntun \u2265${FX_STREAK_MIN}x dari baris terbaru (Kontrol N=${r.controlNDisplay}, Tren N=${r.trendNDisplay}) — dialihkan ke akurasi tertinggi.
+    </div>`;
+    return;
+  }
+
+  const picksTxt = r.posLabels.map(label => {
+    const opt = (FX_RECOMMENDATIONS[label] || []).find(o => o.key === r.combo.picks[label]);
+    return label + '=' + (opt ? opt.label : r.combo.picks[label]);
+  }).join(' · ');
+
+  box.innerHTML = `<div class="hint" style="border:1px solid var(--teal); border-radius:8px; padding:8px 10px; color:var(--teal);">
+    🔥 <b>Streak%</b>: sukses beruntun <b>${r.combo.streak}x</b> dari baris terbaru (Kontrol N=${r.controlNDisplay}, Tren N=${r.trendNDisplay}, gabungan semua posisi).<br>
+    <span style="opacity:.85;">Kombinasi: ${picksTxt}</span>
+  </div>`;
+}
+
+// ---------- TABEL KOMBINASI ACKE — daftar SEMUA kombinasi hasil Auto%/Posisi%/Streak% (bukan
+// cuma 1 yang terbaik), supaya user bisa lihat & pilih kombinasi lain secara manual. ----------
+
+// Nama kombinasi 1 baris, format "LABEL|SOURCE|+LABEL|SOURCE|..." sesuai urutan posLabels (A→C→K→E).
+function fxComboRowName(picks, posLabels){
+  if(!FX_FORMULAS_CACHE) return posLabels.map(label => picks[label]).join('+');
+  const formulaByKey = {};
+  FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
+  return posLabels.map(label => {
+    const f = formulaByKey[picks[label]];
+    return f ? (f.label + '|' + f.source + '|') : picks[label];
+  }).join('+');
+}
+
+// Baris tabel dianggap "aktif" (highlight) kalau picks-nya PERSIS sama dengan radio yang lagi
+// terpilih sekarang di semua posisi — dicek langsung dari fxSelectedKey(), bukan disimpan di
+// variabel terpisah, supaya selalu sinkron sama radio Posisi ACKE (termasuk kalau radio diubah
+// manual di luar tabel ini).
+function fxComboRowIsActive(picks, posLabels){
+  return posLabels.every(label => fxSelectedKey(label) === picks[label]);
+}
+
+// Tampilkan "Angka Hasil" — pool digit tiap posisi (A/C/K/E) dari kombinasi yang SEDANG AKTIF
+// di radio Posisi ACKE, apa pun jalannya (klik 🚀Auto%/📊Posisi%/🔥Streak%, klik baris Tabel
+// Kombinasi, atau geser radio manual). Menggantikan hint statis lama di #fxComboResultBox —
+// dipanggil dari dalam renderFxComboTable() supaya selalu ikut ter-refresh otomatis.
+function renderFxComboResult(){
+  const box = document.getElementById('fxComboResultBox');
+  if(!box) return;
+  if(!lastPosLabels || !lastPosLabels.length || !FX_RECOMMENDATIONS || !FX_FORMULAS_CACHE || !lastHistoryNumbers || !lastHistoryNumbers.length){
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+  const formulaByKey = {};
+  FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
+
+  const items = lastPosLabels.map((label, idx) => {
+    const key = fxSelectedKey(label);
+    const f = key ? formulaByKey[key] : null;
+    let pool = [];
+    if(f){ try{ pool = f.fn(lastHistoryNumbers)[idx] || []; }catch(e){ pool = []; } }
+    return { label, digits: pool.join('') };
+  });
+  if(!items.some(it => it.digits)){
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+
+  const rowsHtml = items.map(it => `<span class="fxComboResultItem"><b>${it.label}:</b>${it.digits || '-'}</span>`).join('');
+  box.innerHTML = `<div class="fxComboResultTitle">Angka Hasil</div><div class="fxComboResultGrid">${rowsHtml}</div>`;
+  box.style.display = 'block';
+}
+
+// Tampilkan status "0x:.. 1x:.. 2x:.. dst" — banyaknya kombinasi (dari SELURUH kombinasi yang
+// dicoba fxSearchBestStreakCombo, bukan cuma yang ditampilkan di Tabel Kombinasi ACKE) untuk
+// tiap panjang Streak Gabungan. Khusus mode Streak% — kosong/hidden untuk mode Auto%/Posisi%.
+function renderFxStreakDist(){
+  const box = document.getElementById('fxStreakDistBox');
+  if(!box) return;
+  const t = FX_LAST_COMBO_TABLE;
+  if(!t || t.mode !== 'streak' || !t.rows || !t.rows.length){
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+
+  const counts = {};
+  let maxStreak = 0;
+  t.rows.forEach(r => {
+    counts[r.streak] = (counts[r.streak] || 0) + 1;
+    if(r.streak > maxStreak) maxStreak = r.streak;
+  });
+
+  const parts = [];
+  for(let s = 0; s <= maxStreak; s++){
+    const c = counts[s] || 0;
+    parts.push(c > 0
+      ? `<span class="fxStreakDistItem" data-streak="${s}" title="Klik: generate ${c} kombinasi ${s}x, gabung jadi 1 daftar angka"><b>${s}x</b>:${c}</span>`
+      : `<span class="fxStreakDistItem disabled"><b>${s}x</b>:${c}</span>`);
+  }
+
+  box.innerHTML = `<div class="fxStreakDistTitle">Status Streak Seluruh Kombinasi (Total ${t.rows.length}) — klik salah satu untuk generate</div><div class="fxStreakDistBody">${parts.join('. ')}.</div>`;
+  box.style.display = 'block';
+
+  box.querySelectorAll('.fxStreakDistItem[data-streak]').forEach(el => {
+    el.addEventListener('click', () => fxGenerateFromStreakGroup(parseInt(el.dataset.streak, 10)));
+  });
+}
+
+// Ambil pool digit per posisi (A/C/K/E) untuk 1 baris kombinasi tertentu (picks), TANPA menyentuh
+// radio Posisi ACKE yang sedang aktif — dipakai fxGenerateFromStreakGroup supaya bisa hitung pool
+// banyak kombinasi sekaligus tanpa mengubah pilihan formula yang sedang ditampilkan user.
+function fxPoolsFromPicks(picks, posLabels){
+  if(!FX_FORMULAS_CACHE) return posLabels.map(() => []);
+  const formulaByKey = {};
+  FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
+  return posLabels.map((label, idx) => {
+    const f = formulaByKey[picks[label]];
+    if(!f) return [];
+    try{ return f.fn(lastHistoryNumbers)[idx] || []; } catch(e){ return []; }
+  });
+}
+
+// Klik salah satu angka di "Status Streak Seluruh Kombinasi" (misal "5x:13") = ambil SEMUA baris
+// Tabel Kombinasi ACKE yang streak-nya sama persis dengan itu, generate tiap kombinasi SECARA
+// TERPISAH (cartesian product pool-nya sendiri), lalu gabungkan (union, tanpa duplikat) jadi satu
+// daftar angka akhir yang dikirim ke Filter Pangkas Kombinasi — sama seperti pola "Kirim ke Filter"
+// Auto Generator, TIDAK mengubah radio Posisi ACKE yang lagi aktif.
+function fxGenerateFromStreakGroup(streakVal){
+  const t = FX_LAST_COMBO_TABLE;
+  if(!t || t.mode !== 'streak' || !t.rows || !t.rows.length){
+    alert('Belum ada Tabel Kombinasi Streak% untuk digenerate.');
+    return;
+  }
+  if(!FX_FORMULAS_CACHE || !lastHistoryNumbers.length){
+    alert('Hitung Formula X dulu (isi Data Historis lalu Hitung Frekuensi).');
+    return;
+  }
+  const group = t.rows.filter(r => r.streak === streakVal);
+  if(!group.length){
+    alert('Tidak ada kombinasi dengan streak ' + streakVal + 'x.');
+    return;
+  }
+
+  const merged = new Set();
+  let usedRows = 0;
+  group.forEach(r => {
+    const pools = fxPoolsFromPicks(r.picks, t.posLabels);
+    if(pools.some(p => !p.length)) return; // lewati kombinasi yang pool-nya tidak lengkap
+    cartesianProduct(pools).forEach(n => merged.add(n));
+    usedRows++;
+  });
+
+  if(!merged.size){
+    alert('Gagal generate — pool digit tiap posisi belum lengkap untuk kombinasi streak ' + streakVal + 'x.');
+    return;
+  }
+
+  const hasilList = [...merged];
+  filterCustomSource = hasilList; // daftar JADI (gabungan banyak kombinasi) -> Filter pakai ini apa adanya
+
+  // ── Bersihkan dulu: input Generator atas (bulkOut — tidak relevan lagi karena hasilList ini
+  // daftar angka jadi, bukan pool per posisi) & hasil Streak lama. fxClearStreakGen1List() sudah
+  // otomatis skip kotak fxGen1Preview/fxGen1Count kalau Gen 1 sedang terkunci (itu tampilan
+  // kuncian asli, bukan streak).
+  const bulkOutEl = document.getElementById('bulkOut');
+  if(bulkOutEl) bulkOutEl.value = '';
+  fxClearStreakGen1List();
+
+  const combineOutEl = document.getElementById('combineOut');
+  const combineCountEl = document.getElementById('combineCountOut');
+  if(combineOutEl) combineOutEl.value = hasilList.join('*') + '*';
+  if(combineCountEl) combineCountEl.textContent = hasilList.length;
+
+  // ── Simpan hasil Streak ini supaya tombol MANUAL GENERATE bisa membacanya nanti. ──
+  fxStreakGen1List = hasilList;
+
+  // Kotak output GEN 1 (di card Auto Generator) HANYA diisi kalau Gen 1 sedang TIDAK terkunci.
+  // Kalau sedang terkunci, isi kuncian yang asli tetap ditampilkan apa adanya — angka Streak ini
+  // tetap tersimpan di fxStreakGen1List dan otomatis aktif begitu Gen 1 di-unlock (tombol
+  // berubah jadi MANUAL GENERATE).
+  const gen1PreviewEl = document.getElementById('fxGen1Preview');
+  const gen1CountEl = document.getElementById('fxGen1Count');
+  let statusNote;
+  if(typeof fxGen1Locked !== 'undefined' && fxGen1Locked){
+    statusNote = 'Gen 1 sedang terkunci — angka Streak disimpan, baru aktif otomatis kalau Gen 1 di-unlock (tombol MANUAL GENERATE).';
+  } else {
+    if(gen1PreviewEl) gen1PreviewEl.textContent = hasilList.slice(0, 16).join('*') + (hasilList.length > 16 ? '*…' : '*');
+    if(gen1CountEl) gen1CountEl.textContent = hasilList.length + ' kombinasi (dari Status Streak, tanpa lock)';
+    statusNote = 'Siap dibaca tombol MANUAL GENERATE.';
+  }
+
+  const genWrap = document.getElementById('genWrap');
+  if(genWrap) genWrap.style.display = 'block';
+  const filterCard = document.getElementById('filterCard');
+  if(filterCard) filterCard.style.display = 'block';
+
+  // ── Pindah tampilan ke halaman Generator — sama seperti yang dipakai pipeline Mode Auto/Semi
+  // Auto (automode.js) setelah Generate+Filter selesai, supaya user langsung lihat hasilnya
+  // tanpa perlu pindah tab manual. ──
+  if(typeof window.goPage === 'function') window.goPage('generator');
+
+  if(document.getElementById('filterCard') && document.getElementById('filterCard').style.display === 'block' && typeof resetFilters === 'function'){
+    // resetFilters() akan panggil applyFilters() yang otomatis pakai filterCustomSource di atas
+    resetFilters();
+  }
+
+  const status = document.getElementById('fxStatus');
+  if(status) status.textContent = `Digenerate ${usedRows} kombinasi dengan streak ${streakVal}x → digabung jadi ${hasilList.length} angka unik. Sudah terkirim ke Filter Pangkas Kombinasi. ${statusNote}`;
+}
+
+function renderFxComboTable(){
+  renderFxComboResult();
+  renderFxStreakDist();
+  const wrap = document.getElementById('fxComboWrap');
+  const body = document.getElementById('fxComboTableBody');
+  const head = document.getElementById('fxComboStatusHead');
+  if(!wrap || !body || !head) return;
+
+  const t = FX_LAST_COMBO_TABLE;
+  if(!t || !t.rows || !t.rows.length){
+    body.innerHTML = '<tr><td colspan="2" class="emptynote" style="padding:10px 8px;">Belum ada data — klik 🚀Auto%, 📊Posisi%, atau 🔥Streak% di atas dulu.</td></tr>';
+    head.textContent = 'Status';
+    return;
+  }
+
+  head.textContent = t.mode === 'streak' ? 'Status (Streak)' : 'Status (%)';
+
+  const rows = t.rows;
+  const TOP_N = 25, BOTTOM_N = 25;
+  const top = rows.slice(0, TOP_N);
+  const bottomCount = Math.max(0, Math.min(BOTTOM_N, rows.length - top.length));
+  const bottom = bottomCount > 0 ? rows.slice(rows.length - bottomCount) : [];
+  const hiddenCount = rows.length - top.length - bottom.length;
+
+  const rowHtml = r => {
+    const name = fxComboRowName(r.picks, t.posLabels);
+    const val = t.mode === 'streak' ? (r.streak + 'x') : (r.pct.toFixed(1) + '%');
+    const active = fxComboRowIsActive(r.picks, t.posLabels);
+    return `<tr class="fxComboRow${active ? ' selected' : ''}" data-picks='${JSON.stringify(r.picks)}'><td>${name}</td><td>${val}</td></tr>`;
+  };
+
+  let html = top.map(rowHtml).join('');
+  if(hiddenCount > 0){
+    html += `<tr class="fxComboSep"><td colspan="2">⋯ ${hiddenCount} kombinasi lainnya disembunyikan ⋯</td></tr>`;
+  }
+  html += bottom.map(rowHtml).join('');
+  body.innerHTML = html;
+
+  body.querySelectorAll('tr.fxComboRow').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const picks = JSON.parse(tr.dataset.picks);
+      fxApplyComboRowClick(picks);
+    });
+  });
+}
+
+// Klik 1 baris di Tabel Kombinasi ACKE = SAMA PERSIS seperti klik tombol Posisi%/Streak% lalu
+// otomatis terarahkan ke kombinasi itu: geser radio tiap posisi ke formula yang dipilih baris
+// ini, lalu ikuti alur render normal (termasuk isi Generator 1/2 yang belum dikunci). TIDAK ada
+// state pilihan terpisah — radio Posisi ACKE itu sendiri yang jadi sumber kebenaran.
+function fxApplyComboRowClick(picks){
+  if(!lastPosLabels || !FX_RECOMMENDATIONS) return;
+  lastPosLabels.forEach(label => {
+    if(!(label in picks)) return;
+    const idx = (FX_RECOMMENDATIONS[label] || []).findIndex(r => r.key === picks[label]);
+    if(idx >= 0){ FX_SELECTED[label] = idx; FX_TOUCHED[label] = true; }
+  });
+  renderFormulaX(lastPosLabels);
+  renderFxTrendNumbers(lastPosLabels, lastHistoryNumbers);
+  renderTopPosisi(lastPosLabels, lastHistoryNumbers);
+  renderFxBacktestTable(lastPosLabels, lastHistoryNumbers);
+  fxApplyToGenerator(true);
+  if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
+  if(typeof renderGen2LockUI === 'function' && typeof FX_GEN2_SLOTS !== 'undefined') FX_GEN2_SLOTS.forEach(renderGen2LockUI);
+  renderFxComboTable(); // refresh highlight baris yang lagi aktif
+}
+
 function renderFxTrendNumbers(posLabels, used){
   const grid = document.getElementById('fxTrendCols');
-  if(!FX_RECOMMENDATIONS || !FX_FORMULAS_CACHE){ grid.innerHTML = ''; return; }
+  if(!FX_RECOMMENDATIONS || !FX_FORMULAS_CACHE){ grid.innerHTML = ''; renderFxStreakStatus(); return; }
   const formulaByKey = {};
   FX_FORMULAS_CACHE.formulas.forEach(f => { formulaByKey[f.key] = f; });
 
@@ -756,6 +1266,7 @@ function renderFxTrendNumbers(posLabels, used){
   });
   grid.innerHTML = '';
   grid.appendChild(wrap);
+  renderFxStreakStatus();
 }
 
 // ---------- TOP POSISI: gabungan 3 sumber tren teratas -> Kuat (ada di 3-3nya) / Sedang (selebihnya) ----------
@@ -929,6 +1440,7 @@ function setupSectionToggle(headId, wrapId, iconId){
 }
 setupSectionToggle('fxCardToggle', 'fxCardWrap', 'fxCardToggleIcon');
 setupSectionToggle('fxAckeToggle', 'fxAckeWrap', 'fxAckeToggleIcon');
+setupSectionToggle('fxComboToggle', 'fxComboWrap', 'fxComboToggleIcon');
 setupSectionToggle('fxTableToggle', 'fxTableWrap', 'fxTableToggleIcon');
 setupSectionToggle('fxTrendToggle', 'fxTrendWrap', 'fxTrendToggleIcon');
 setupSectionToggle('jsToggle', 'jsWrap', 'jsToggleIcon');
@@ -949,6 +1461,12 @@ function fxApplyToGenerator(silent){
     if(document.getElementById('filterCard').style.display === 'block') resetFilters();
     return;
   }
+
+  // Gen 1 TIDAK terkunci dan fungsi ini mau menghitung/menimpa pool dari Formula X yang aktif
+  // (dipicu: ganti periode/pasaran lewat analyze(), pilih radio/baris tabel sendiri, atau
+  // tombol Streak%/Auto%/Posisi%) — daftar hasil Status Streak yang lama (kalau ada) sudah
+  // tidak relevan lagi, bersihkan dulu.
+  if(typeof fxClearStreakGen1List === 'function') fxClearStreakGen1List();
 
   if(!FX_FORMULAS_CACHE || !lastPosLabels || !lastHistoryNumbers.length){
     if(!silent) alert('Hitung Formula X dulu (isi Data Historis lalu Hitung Frekuensi).');
@@ -1034,6 +1552,12 @@ document.getElementById('fxRecalcBtn').addEventListener('click', () => {
 
 
 function analyze(){
+  // ── Aturan tetap: ganti pasaran/periode (analyze() ini selalu dipanggil ulang tiap kali
+  // Data Historis/Periode berubah) -> daftar hasil Status Streak (fxStreakGen1List) SELALU
+  // dibersihkan, tanpa syarat status lock Gen 1. Taruh paling atas supaya pasti kena walau
+  // nanti di bawah ada jalur early-return lain. ──
+  if(typeof fxClearStreakGen1List === 'function') fxClearStreakGen1List();
+
   const raw = document.getElementById('dataInput').value;
   const parsedWithMonth = parseDataWithMonth(raw);
   const tokens = parsedWithMonth.tokens;
