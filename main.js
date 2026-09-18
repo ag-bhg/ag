@@ -44,6 +44,8 @@ function resetAllSettings(){
   // tindih dengan itu — dan berisiko konflik kalau nanti Preset ikut mengisi FX_SELECTED.
   FX_TOUCHED = {};
   TOP_POSISI_SELECTED = {};
+  if(typeof FX_OPT_ACTIVE_METHOD !== 'undefined') FX_OPT_ACTIVE_METHOD = null;
+  if(typeof fxRenderOptToggleUI === 'function') fxRenderOptToggleUI();
 
   // Mode Normal WAJIB lepas dari kendali Preset — kalau tidak, aturan per-posisi preset yang
   // masih "aktif" akan dipasang lagi otomatis lewat hook di automode.js tiap Formula X dihitung.
@@ -346,6 +348,7 @@ function presetApplyGen2(data){
 function presetCollectExtra(){
   return {
     fxSelected: { ...FX_SELECTED },
+    fxOptActiveMethod: (typeof FX_OPT_ACTIVE_METHOD !== 'undefined') ? FX_OPT_ACTIVE_METHOD : null,
     topPosisiSelected: { ...TOP_POSISI_SELECTED },
     twinPairs: (typeof getSelectedTwinMurniPairs === 'function') ? getSelectedTwinMurniPairs() : [],
     shio: [...document.querySelectorAll('.shioPick:checked')].map(el => el.dataset.shio),
@@ -366,6 +369,14 @@ function presetApplyExtraNow(extra){
   // Generator: Kombinasi Acak manual/otomatis — aman dipasang kapan saja, tidak tergantung data.
   if(extra.generator && extra.generator.bulkOut != null){
     document.getElementById('bulkOut').value = extra.generator.bulkOut;
+  }
+
+  // Identitas tombol toggle Auto%/Posisi%/Streak% (Formula X) — aman dipasang kapan saja, tidak
+  // tergantung data historis (cuma tampilan class "active" tombolnya). Nilai aktualnya baru
+  // dipakai untuk menghitung ulang FX_SELECTED lewat fxAutoLockGen1FromPreset() (automode.js).
+  if('fxOptActiveMethod' in extra){
+    if(typeof FX_OPT_ACTIVE_METHOD !== 'undefined') FX_OPT_ACTIVE_METHOD = extra.fxOptActiveMethod || null;
+    if(typeof fxRenderOptToggleUI === 'function') fxRenderOptToggleUI();
   }
 
   // Sisanya butuh Data Historis sudah diproses (posisi & Formula X sudah ada).
