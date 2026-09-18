@@ -569,22 +569,24 @@ async function fxAutoLockGen1FromPreset(maxAttempts = 3, delayMs = 300){
   // DAN fxSelected bawaan preset) — supaya bagian-bagian lain di luar Gen1 tidak ikut hilang.
   if(presetPendingExtra && typeof presetApplyExtraNow === 'function') presetApplyExtraNow(presetPendingExtra);
 
-  // 3b) Kalau dropdown "Pilih Sumber GEN1" (#autoGen1SourceSelect) = "auto", TIMPA FX_SELECTED
-  // yang barusan dipasang preset dengan hasil optimizer Auto% (Wilson -> Posisi%), dihitung ULANG
-  // setiap siklus ini supaya formula per posisi selalu ikut akurasi data terbaru, bukan preset.
-  // Kalau "manual" (default lama, arti sebenarnya "ikuti Preset") -> tidak ada perubahan sama sekali.
+  // 3b) Kalau identitas tombol toggle Formula X (FX_OPT_ACTIVE_METHOD — Auto%/Posisi%/Streak%,
+  // lihat formula.js) sedang aktif, TIMPA FX_SELECTED yang barusan dipasang preset dengan hasil
+  // metode itu, dihitung ULANG setiap siklus ini supaya formula per posisi selalu ikut akurasi
+  // data terbaru, bukan preset. Kalau null (tidak ada tombol aktif, arti sebenarnya "ikuti Preset")
+  // -> tidak ada perubahan sama sekali. MENGGANTIKAN dropdown lama "Pilih Sumber GEN1"
+  // (autoGen1SourceSelect, sudah dihapus dari index.html) — identitasnya sekarang tombol itu
+  // sendiri, ikut tersimpan/dimuat lewat preset (lihat presetCollectExtra/presetApplyExtraNow
+  // di main.js, field fxOptActiveMethod).
   //
-  // Kalau fxRunAutoPercentCore() GAGAL nemuin kandidat (aturan Pss%+Status di formula.js sampai
-  // 5 tingkat tidak ketemu Status>0x) -> JANGAN lanjut ke fxBuildGen1Pools/lock sama sekali,
-  // karena FX_SELECTED di titik ini basi/fallback (tidak diubah oleh fxRunAutoPercentCore saat
-  // gagal) — kalau tetap dipaksa lock, Gen 1 akan ke-lock diam-diam pakai pilihan yang bukan hasil
-  // optimasi valid. STOP di sini, tandai fxGen1AutoNoCandidateMsg supaya pipeline pemanggil kasih
-  // pesan yang spesifik ke user, bukan pesan generik "Preset tidak punya Formula X yang cocok".
-  const gen1SourceEl = document.getElementById('autoGen1SourceSelect');
-  const gen1Source = gen1SourceEl ? gen1SourceEl.value : 'manual';
-  if(gen1Source === 'auto' && typeof fxRunAutoPercentCore === 'function'){
-    const autoOk = fxRunAutoPercentCore(true); // silent=true — alert generiknya di-skip, biar tidak dobel dengan pesan spesifik di bawah
-    if(!autoOk){
+  // Kalau metode yang dipilih GAGAL nemuin kandidat (aturan Pss%+Status di formula.js sampai
+  // 5 tingkat tidak ketemu Status>0x, atau Streak% tidak ada yang lolos ambang FX_STREAK_MIN) ->
+  // JANGAN lanjut ke fxBuildGen1Pools/lock sama sekali, karena FX_SELECTED di titik ini basi/
+  // fallback — kalau tetap dipaksa lock, Gen 1 akan ke-lock diam-diam pakai pilihan yang bukan
+  // hasil optimasi valid. STOP di sini, tandai fxGen1AutoNoCandidateMsg supaya pipeline pemanggil
+  // kasih pesan yang spesifik ke user, bukan pesan generik "Preset tidak punya Formula X yang cocok".
+  if(FX_OPT_ACTIVE_METHOD && typeof fxRunOptMethodCore === 'function'){
+    const methodOk = fxRunOptMethodCore(FX_OPT_ACTIVE_METHOD, true); // silent=true — alert generiknya di-skip, biar tidak dobel dengan pesan spesifik di bawah
+    if(!methodOk){
       fxGen1AutoNoCandidateMsg = 'Silakan ganti preset atau ganti mode, karena di mode ini tidak mendapatkan angka terbaik.';
       return false;
     }
@@ -1013,16 +1015,14 @@ function getAppMode(){ return localStorage.getItem(APP_MODE_KEY) || 'normal'; }
 // Auto%/Posisi%/ganti periode) — supaya dua-duanya SELALU konsisten, tidak ada celah salah satu
 // masih menimpa radio sementara yang lain sudah tidak.
 // - Mode Normal            -> TIDAK ikut Preset sama sekali (radio bebas, lihat presetApplyExtraNow).
-// - Mode Auto + Sumber GEN1 = Auto% -> TIDAK ikut Preset (radio harus menunjukkan hasil Auto%,
-//   yang dikunci ke Gen1 lewat fxRunAutoPercentCore() di fxAutoLockGen1FromPreset()).
-// - Selain itu (Mode Auto + Sumber GEN1 = Manual, atau Mode Semi Auto) -> ikut Preset seperti biasa.
+// - Mode Auto + ada tombol Auto%/Posisi%/Streak% yang aktif (FX_OPT_ACTIVE_METHOD, lihat
+//   formula.js) -> TIDAK ikut Preset (radio harus menunjukkan hasil metode itu, yang dikunci ke
+//   Gen1 lewat fxRunOptMethodCore() di fxAutoLockGen1FromPreset()).
+// - Selain itu (Mode Auto tanpa tombol aktif, atau Mode Semi Auto) -> ikut Preset seperti biasa.
 function fxSelectedFollowsPreset(){
   const mode = getAppMode();
   if(mode === 'normal') return false;
-  if(mode === 'auto'){
-    const gen1SourceEl = document.getElementById('autoGen1SourceSelect');
-    if(gen1SourceEl && gen1SourceEl.value === 'auto') return false;
-  }
+  if(mode === 'auto' && typeof FX_OPT_ACTIVE_METHOD !== 'undefined' && FX_OPT_ACTIVE_METHOD) return false;
   return true;
 }
 
@@ -1280,12 +1280,12 @@ document.getElementById('modeAutoBtn').addEventListener('click', ()=>{
 });
 
 // ── Pengaman: tombol "Aktifkan Auto" berubah jadi "Stop Auto" selama Mode Auto berjalan, dan
-// dropdown Preset/Sumber GEN1/Sumber GEN2 dikunci (disabled) supaya tidak diubah diam-diam
-// selagi pipeline auto sedang jalan — baru bisa diubah lagi setelah "Stop Auto" ditekan. ──
+// dropdown Preset/Sumber GEN2 dikunci (disabled) supaya tidak diubah diam-diam selagi pipeline
+// auto sedang jalan — baru bisa diubah lagi setelah "Stop Auto" ditekan. ──
 function applyAutoUiRunningState(running){
   const btn = document.getElementById('autoActivateBtn');
   if(btn) btn.textContent = running ? '⏹ Stop Auto' : '⚡ Aktifkan Auto';
-  ['autoPresetSelect', 'autoGen1SourceSelect', 'autoGen2SourceSelect'].forEach(id => {
+  ['autoPresetSelect', 'autoGen2SourceSelect'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.disabled = running;
   });
