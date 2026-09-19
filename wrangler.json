@@ -6,6 +6,7 @@
   "assets": { "directory": "./", "binding": "ASSETS" },
   "observability": { "enabled": true, "logs": { "enabled": true } },
   "triggers": { "crons": ["*/30 * * * *"] },
+  "ai": { "binding": "AI" },
   "secrets_store_secrets": [
     {
       "binding": "DATABASE_URL_SECRET",
