@@ -15,6 +15,7 @@ const A = {
   tilt: null,            // bobot awal hasil belajar antar pasaran
   cur: null, out: 8, outPos: {}, pin: {}, ban: {}, famOff: {},
   lastPred: null, busy: false, chat: [], sig: '', globalNote: '',
+  alias: {}, src: {}, lastActive: '', activeMiss: '',
   patterns: {},          // kalimat yang sudah "diajarkan" user -> perintah asli yang dimaksud
   pendingTeach: null      // { phrase, cmd } — menunggu konfirmasi ya/tidak dari user
 };
@@ -82,14 +83,19 @@ function persistBrain(name, st){
 }
 
 // ---------- Sumber data pasaran ----------
+// A.alias: kode/kunci peta Firebase -> nama pasaran yang dipakai Ai (nama bisa beda dari kode).
+// A.src: nama pasaran -> asal datanya (Firebase / impor JSON / kotak Data Historis), ditampilkan di status.
 function readFirebaseMap(){
-  const out = {};
+  const out = {}; A.alias = {};
   try{
     if(typeof firebaseMarketMap === 'undefined' || !firebaseMarketMap) return out;
     const ents = (firebaseMarketMap instanceof Map) ? Array.from(firebaseMarketMap.entries()) : Object.entries(firebaseMarketMap);
     ents.forEach(([k, v]) => {
       const txt = typeof v === 'string' ? v : (v && typeof v.data === 'string' ? v.data : null);
-      if(txt) out[(v && v.name) || k] = txt;
+      if(!txt) return;
+      const name = (v && v.name) || k;
+      out[name] = txt;
+      A.alias[String(k).toUpperCase()] = name;
     });
   }catch(e){}
   return out;
@@ -98,13 +104,40 @@ function activeCode(){
   try{ if(typeof firebaseSelectedKode === 'function') return firebaseSelectedKode() || ''; }catch(e){}
   return '';
 }
+// Label pasaran yang sedang dipilih di dropdown "Periode" (mis. "MICHIGAN MID · 23j 30m" -> "MICHIGAN MID")
+function activeLabels(){
+  const c = [], code = activeCode(); if(code) c.push(code);
+  const sel = document.getElementById('analisisPeriodeSelect');
+  if(sel){
+    if(sel.value) c.push(sel.value);
+    const o = sel.options && sel.options[sel.selectedIndex];
+    if(o && o.text){ c.push(o.text.split('·')[0].trim()); c.push(o.text.trim()); }
+  }
+  return c.filter(Boolean);
+}
+// Cari pasaran aktif di daftar pasaran Ai. Kembalikan { name } kalau ketemu, { miss: label } kalau ada pasaran aktif
+// tapi tidak ada/kurang data di Ai, atau {} kalau tidak ada pasaran aktif sama sekali.
+function resolveActive(ms){
+  const names = Object.keys(ms), up = x => String(x == null ? '' : x).trim().toUpperCase();
+  const find = q => { q = up(q); return q ? names.find(n => up(n) === q) : undefined; };
+  const cands = activeLabels();
+  for(let i = 0; i < cands.length; i++){
+    const n = find(cands[i]) || find(A.alias[up(cands[i])]);
+    if(n) return { name: n };
+  }
+  return cands.length ? { miss: cands.length > 2 ? cands[cands.length - 2] : cands[cands.length - 1] } : {};
+}
 function collectTexts(){
-  const texts = Object.assign({}, A.imported, readFirebaseMap());
+  const texts = {}, src = {};
+  Object.keys(A.imported).forEach(k => { texts[k] = A.imported[k]; src[k] = 'impor JSON'; });
+  const fb = readFirebaseMap();
+  Object.keys(fb).forEach(k => { texts[k] = fb[k]; src[k] = 'Firebase'; });
   const di = document.getElementById('dataInput');
   if(di && di.value && di.value.trim()){
     const code = activeCode() || 'AKTIF';
-    if(!texts[code]) texts[code] = di.value; // data yang sedang tampil, hanya kalau belum ada sumber lain
+    if(!texts[code]){ texts[code] = di.value; src[code] = 'kotak Data Historis'; } // hanya kalau belum ada sumber lain
   }
+  A.src = src;
   return texts;
 }
 function markets(){
@@ -117,10 +150,18 @@ function markets(){
   });
   return res;
 }
+// Pasaran yang dipakai Ai MENGIKUTI pasaran aktif di dropdown Periode: begitu pasaran aktif berganti, A.cur ikut
+// berpindah. Pilihan manual di dropdown/perintah "pasaran X" tetap dihormati sampai pasaran aktif berganti lagi.
+// (Dulu A.cur yang lama selalu menang, jadi Ai nyangkut di pasaran pertama walau Periode sudah diganti.)
 function pickDefaultCur(ms){
-  const code = activeCode();
+  const act = resolveActive(ms);
+  A.activeMiss = act.miss || '';
+  if(act.name){
+    if(act.name !== A.lastActive){ A.lastActive = act.name; A.cur = act.name; A.pin = {}; A.ban = {}; }
+    if(A.cur && ms[A.cur]) return A.cur;
+    return act.name;
+  }
   if(A.cur && ms[A.cur]) return A.cur;
-  if(code && ms[code]) return code;
   if(ms.AKTIF) return 'AKTIF';
   return Object.keys(ms).sort()[0] || null;
 }
@@ -154,7 +195,7 @@ async function learnAll(){
       if(pm.C.length < 20) continue;
       const st = B.learnMarket(names[i], pm.C, pm.L, { tilt, state: tilt === A.tilt ? A.states[names[i]] : null });
       A.states[names[i]] = st; states.push(st);
-      if(i % 4 === 0){ setStatus('Belajar ' + (i + 1) + '/' + names.length + ' · ' + names[i]); await tick(); }
+      setStatus('Belajar ' + (i + 1) + '/' + names.length + ' · ' + names[i]); await tick();
     }
     return states;
   };
@@ -304,7 +345,8 @@ async function askAiChat(userText){
 async function run(text){
   const raw = String(text || '').trim(); if(!raw) return;
   say(raw, 'user');
-  return handle(raw);
+  try{ return await handle(raw); }
+  catch(e){ console.error('Mode Ai: error saat menjalankan perintah', e); say('⚠️ Ada error saat menjalankan perintah: ' + (e && e.message ? e.message : e)); }
 }
 
 async function handle(rawText){
@@ -329,6 +371,17 @@ async function handle(rawText){
   if(A.patterns[t]) return handle(A.patterns[t]);
 
   if(/^(bantuan|help|\?)$/.test(t)) return say(helpText());
+  if(/^sumber/.test(t)){
+    const fb = readFirebaseMap(), fbN = Object.keys(fb).length, imN = Object.keys(A.imported).length;
+    const dup = Object.keys(A.imported).filter(k => k in fb).length;
+    let shape = '(peta Firebase kosong / tidak ditemukan)';
+    try{
+      const ents = (typeof firebaseMarketMap !== 'undefined' && firebaseMarketMap) ? ((firebaseMarketMap instanceof Map) ? Array.from(firebaseMarketMap.entries()) : Object.entries(firebaseMarketMap)) : [];
+      if(ents.length){ const [k, v] = ents[0]; shape = 'contoh entri: kunci “' + k + '” → ' + (typeof v === 'string' ? 'teks' : 'objek {' + Object.keys(v || {}).slice(0, 6).join(', ') + '}') + (v && v.name ? ', name “' + v.name + '”' : ''); }
+    }catch(e){}
+    const act = resolveActive(ms);
+    return say('SUMBER DATA Ai:\n• Pasaran aktif di Periode: ' + (activeLabels().join(' | ') || '(tidak ada)') + '\n• Cocok di Ai: ' + (act.name ? act.name + ' (sumber ' + (A.src[act.name] || '?') + ')' : '⚠️ TIDAK ADA' + (act.miss ? ' (label “' + act.miss + '”)' : '')) + '\n• Ai sedang memakai: ' + (cur || '-') + (cur ? ' (' + (A.src[cur] || '?') + ', ' + ms[cur].C.length + ' data)' : '') + '\n• Pasaran dari Firebase: ' + fbN + ' · dari impor JSON: ' + imN + (dup ? ' (' + dup + ' nama sama dgn Firebase → Firebase yang dipakai)' : '') + '\n• ' + shape);
+  }
   if((m = t.match(/^out\s+(reset|semua)$/))){ A.outPos = {}; A.out = 8; refreshPredict(true); return say('OUT dikembalikan ke 8 untuk semua posisi.'); }
   if((m = t.match(/^out\s+(?:([a-z])\s+)?([1-9])$/))){
     const n = +m[2]; if(n < 4 || n > 9) return say('OUT harus 4–9.');
@@ -422,7 +475,7 @@ async function handle(rawText){
 }
 
 function helpText(){
-  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• tampilkan test [pasaran] (dari ingatan, tanpa hitung ulang)\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• kirim (ke Generator) · rapor\n\nKalau kalimat Anda tidak mirip perintah manapun, saya coba tebak & tanya konfirmasi dulu (sekali dikonfirmasi, saya ingat terus). Kalau memang bukan perintah, saya jawab santai lewat obrolan bebas.';
+  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• tampilkan test [pasaran] (dari ingatan, tanpa hitung ulang)\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• sumber (cek data mana yang dipakai Ai)\n• kirim (ke Generator) · rapor\n\nKalau kalimat Anda tidak mirip perintah manapun, saya coba tebak & tanya konfirmasi dulu (sekali dikonfirmasi, saya ingat terus). Kalau memang bukan perintah, saya jawab santai lewat obrolan bebas.';
 }
 function predText(r){
   return 'Pasaran ' + r.name + ' (' + r.n + ' data' + (r.newRows ? ', +' + r.newRows + ' baru dipelajari' : '') + '):\n' + r.pr.map(x => x.label + ' [' + x.digits.join(' ') + '] · peluang gabungan ' + (x.mass * 100).toFixed(1) + '% vs acak ' + (x.chance * 100).toFixed(0) + '%' + (x.wNull > 0.5 ? ' ≈ acak' : '')).join('\n') + '\n' + (r.pr.every(x => x.wNull > 0.5) ? 'Ai sendiri menilai belum ada pola yang terbukti di pasaran ini — angka di atas hampir setara pilihan acak.' : 'Selisih kecil dari acak itu normal; cek “uji” untuk bukti ke belakang.');
@@ -510,7 +563,7 @@ function renderAll(){
   sel.innerHTML = names.length ? names.map(n => '<option value="' + esc(n) + '"' + (n === A.cur ? ' selected' : '') + '>' + esc(n) + (A.states[n] ? ' ✓' : '') + '</option>').join('') : '<option value="">— belum ada data —</option>';
   card.querySelector('#aimOut').value = String(A.out);
   const learned = Object.keys(A.states).length;
-  setStatus(names.length + ' pasaran tersedia · ' + learned + ' sudah dipelajari' + (A.cur ? ' · aktif ' + A.cur + ' (' + ms[A.cur].C.length + ' data)' : '') + (A.globalNote ? '\n' + A.globalNote : ''));
+  setStatus(names.length + ' pasaran tersedia · ' + learned + ' sudah dipelajari' + (A.cur ? ' · aktif ' + A.cur + ' (' + ms[A.cur].C.length + ' data, sumber: ' + (A.src[A.cur] || '?') + ')' : '') + (A.activeMiss && A.activeMiss.toUpperCase() !== String(A.cur).toUpperCase() ? '\n⚠️ Pasaran aktif di Periode “' + A.activeMiss + '” tidak ditemukan di data Ai (atau datanya < 12 baris) — ketik “sumber” untuk cek.' : '') + (A.globalNote ? '\n' + A.globalNote : ''));
   const box = card.querySelector('#aimResult');
   if(!A.lastPred || !A.cur){ box.innerHTML = '<p class="hint" style="margin:0;">Belum ada prediksi. Tekan “🎯 Prediksi”.</p>'; }
   else {
@@ -582,20 +635,21 @@ function applyView(mode){
   card.style.display = on ? '' : 'none';
   const pa = document.getElementById('pengaturanAnalisaSection');
   if(on && pa) pa.style.display = 'none';
-  if(on){ A.sig = ''; syncData(true); }
+  if(on){ A.sig = ''; try{ syncData(true); }catch(e){ console.error('Mode Ai: gagal sinkron data', e); } }
 }
 
 // Data baru masuk (periode baru / ganti pasaran): Ai otomatis belajar lanjutan — inilah "meningkat sendiri".
 function sigNow(){
   const di = document.getElementById('dataInput'); const v = di ? di.value : '';
-  return activeCode() + '|' + v.length + '|' + v.slice(0, 60) + '|' + v.slice(-60) + '|' + Object.keys(readFirebaseMap()).length;
+  return activeLabels().join('/') + '|' + v.length + '|' + v.slice(0, 60) + '|' + v.slice(-60) + '|' + Object.keys(readFirebaseMap()).length;
 }
 function syncData(force){
   if(!card || card.style.display === 'none' || A.busy) return;
   const s = sigNow(); if(!force && s === A.sig) return;
   const first = !A.sig; A.sig = s;
-  const before = A.cur && A.states[A.cur] ? A.states[A.cur].t : 0;
-  const r = predictCur(); renderAll();
+  let r = null;
+  try{ r = predictCur(); }catch(e){ console.error('Mode Ai: gagal memperbarui prediksi', e); }
+  renderAll();
   if(r && A.states[r.name]){
     save();
     if(!first && r.newRows > 0){
