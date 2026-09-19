@@ -491,6 +491,26 @@ export default {
       }
     }
 
+    // Endpoint chat "otak AI" Mode Ai (aiMode.js) — dipanggil dari browser cuma sebagai JALUR CADANGAN,
+    // saat kalimat user tidak cocok perintah terstruktur manapun. Pakai Workers AI (binding "AI" di
+    // wrangler.json), gratis sampai batas harian, tidak perlu API key sama sekali.
+    if (url.pathname === '/api/ai-chat' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const messages = Array.isArray(body.messages) ? body.messages.slice(-8) : []; // konteks dibatasi, hemat kuota
+        if (!messages.length) {
+          return Response.json({ ok: false, error: 'messages kosong' }, { status: 400 });
+        }
+        const res = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          messages,
+          max_tokens: 400
+        });
+        return Response.json({ ok: true, reply: res.response });
+      } catch (e) {
+        return Response.json({ ok: false, error: String(e) }, { status: 500 });
+      }
+    }
+
     const match = url.pathname.match(/^\/api\/settings\/([^/]+)$/);
     if (match) {
       const pasaran = decodeURIComponent(match[1]);
