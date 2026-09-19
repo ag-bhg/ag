@@ -14,11 +14,13 @@ const A = {
   states: {},            // name -> state otak
   tilt: null,            // bobot awal hasil belajar antar pasaran
   cur: null, out: 8, outPos: {}, pin: {}, ban: {}, famOff: {},
-  lastPred: null, busy: false, chat: [], sig: '', globalNote: ''
+  lastPred: null, busy: false, chat: [], sig: '', globalNote: '',
+  patterns: {},          // kalimat yang sudah "diajarkan" user -> perintah asli yang dimaksud
+  pendingTeach: null      // { phrase, cmd } — menunggu konfirmasi ya/tidak dari user
 };
 
-// ---------- Penyimpanan ----------
-function load(){
+// ---------- Penyimpanan lokal (instan, cadangan offline) ----------
+function loadLocal(){
   try{
     const o = JSON.parse(localStorage.getItem(LS_STATES) || 'null');
     if(o){
@@ -28,7 +30,7 @@ function load(){
     A.imported = JSON.parse(localStorage.getItem(LS_DATA) || '{}') || {};
   }catch(e){}
 }
-function save(){
+function saveLocal(){
   try{
     const states = {};
     Object.keys(A.states).forEach(k => { states[k] = B.serialize(A.states[k]); });
@@ -36,6 +38,48 @@ function save(){
   }catch(e){ say('⚠️ Memori browser penuh, hasil belajar tidak tersimpan (tetap jalan selama halaman terbuka).'); }
 }
 function saveData(){ try{ localStorage.setItem(LS_DATA, JSON.stringify(A.imported)); }catch(e){} }
+
+// ---------- Penyimpanan ingatan (Firebase lewat aiMemory.js, fallback localStorage otomatis) ----------
+// load() dipanggil sekali saat init(): ambil cadangan lokal dulu (instan), lalu timpa dengan versi
+// cloud kalau berhasil didapat (supaya ingatan sama persis di semua perangkat).
+async function load(){
+  loadLocal();
+  if(typeof AiMemory === 'undefined') return;
+  try{
+    const mem = await AiMemory.loadAll();
+    const p = mem.prefs || {};
+    if('out' in p) A.out = p.out;
+    if('tilt' in p) A.tilt = p.tilt;
+    if('globalNote' in p) A.globalNote = p.globalNote;
+    if('pin' in p) A.pin = p.pin || {};
+    if('ban' in p) A.ban = p.ban || {};
+    if('famOff' in p) A.famOff = p.famOff || {};
+    if('outPos' in p) A.outPos = p.outPos || {};
+    A.patterns = mem.patterns || {};
+    if(mem.chat && mem.chat.length) A.chat = mem.chat;
+    Object.keys(mem.brain || {}).forEach(k => {
+      const entry = mem.brain[k]; if(!entry || !entry.state || !entry.name) return;
+      const st = B.deserialize(entry.state); if(st) A.states[entry.name] = st;
+    });
+  }catch(e){ console.error('Mode Ai: gagal memuat ingatan cloud, pakai cadangan lokal', e); }
+}
+// save() dipanggil dari banyak tempat di seluruh file ini (tiap kali pengaturan berubah) — tetap
+// simpan lokal seperti semula, plus kirim preferensi (bukan seluruh otak, itu berat) ke cloud.
+function save(){
+  saveLocal();
+  if(typeof AiMemory !== 'undefined'){
+    AiMemory.savePrefs({ out: A.out, tilt: A.tilt, globalNote: A.globalNote, pin: A.pin, ban: A.ban, famOff: A.famOff, outPos: A.outPos });
+  }
+}
+// Kirim HASIL BELAJAR 1 pasaran ke cloud — dipanggil hanya di titik-titik yang benar mengubah otak
+// (bukan tiap render), supaya tidak boros nulis. Ditimpa (bukan ditumpuk) tiap kali dipanggil ulang.
+function persistBrain(name, st){
+  if(typeof AiMemory === 'undefined' || !name || !st) return;
+  try{
+    const ev = B.evalAll([st], A.out);
+    AiMemory.saveBrainResult(name, { state: B.serialize(st), pct: ev.pct, z: ev.z, n: ev.n });
+  }catch(e){ console.error('Mode Ai: gagal simpan hasil belajar ' + name + ' ke cloud', e); }
+}
 
 // ---------- Sumber data pasaran ----------
 function readFirebaseMap(){
@@ -89,6 +133,13 @@ function learnOne(name, ms){
   A.states[name] = st;
   return { st, newRows: Math.max(0, st.t - Math.max(before, B.T0)) };
 }
+const persistBrainSoon = (() => {
+  const timers = {};
+  return (name) => {
+    clearTimeout(timers[name]);
+    timers[name] = setTimeout(() => { if(A.states[name]) persistBrain(name, A.states[name]); }, 1500);
+  };
+})();
 const tick = () => new Promise(r => setTimeout(r, 0));
 async function learnAll(){
   const ms = markets(), names = Object.keys(ms).sort();
@@ -117,6 +168,7 @@ async function learnAll(){
   const ev = B.evalAll(states, A.out);
   A.globalNote = 'Semua pasaran, OUT ' + A.out + ': Ai kena ' + ev.pct.toFixed(2) + '% vs acak ' + ev.chance.toFixed(0) + '% (z=' + ev.z.toFixed(2) + ').';
   save();
+  states.forEach(st => persistBrain(st.name, st)); // "belajar semua" diminta manual — simpan semua ke cloud sekaligus
   const top = rep[0] && rep[0].z > 0
     ? 'Pakar terbaik lintas pasaran: ' + rep.slice(0, 3).map(r => r.id + ' (z=' + r.z.toFixed(1) + (r.pass ? ', LOLOS' : '') + ')').join(', ') + '.'
     : 'Tidak ada satu pakar pun (formula maupun milik Ai) yang mengalahkan tebakan acak secara konsisten lintas pasaran.';
@@ -163,12 +215,119 @@ const FAMS = { nrl: ['NRL'], ml: ['ML'], mb: ['MB'], idx: ['IDX'], bhg: ['BHG'],
 function posIdx(ch, L){ const lab = B.posLabels(L); const i = lab.indexOf(String(ch).toUpperCase()); return i; }
 function digitsIn(s){ return (String(s).match(/[0-9]/g) || []).map(Number).filter((d, i, a) => a.indexOf(d) === i); }
 
+// Daftar perintah baku (tanpa parameter) yang boleh "diajarkan" lewat kalimat bebas — dipakai
+// untuk menebak maksud user saat kalimatnya tidak cocok pola manapun (lihat suggestCommand()).
+const CANON_CMDS = [
+  { cmd: 'bantuan', label: 'bantuan — lihat daftar perintah', kw: ['bantuan', 'help', 'tolong', 'panduan', 'perintah'] },
+  { cmd: 'belajar semua', label: 'belajar semua — Ai belajar semua pasaran', kw: ['belajar', 'pelajari', 'ajari', 'semua', 'sinau'] },
+  { cmd: 'belajar', label: 'belajar — pasaran yang aktif saja', kw: ['belajar', 'pelajari', 'update'] },
+  { cmd: 'prediksi', label: 'prediksi — tampilkan angka', kw: ['prediksi', 'tebak', 'angka', 'hasil', 'keluaran'] },
+  { cmd: 'uji semua', label: 'uji semua — cek akurasi semua pasaran', kw: ['uji', 'tes', 'test', 'cek', 'akurasi', 'semua'] },
+  { cmd: 'uji', label: 'uji — cek akurasi pasaran aktif', kw: ['uji', 'tes', 'test', 'cek', 'akurasi'] },
+  { cmd: 'eksperimen', label: 'eksperimen — coba gabungan pakar baru', kw: ['eksperimen', 'coba', 'gabung', 'lab'] },
+  { cmd: 'kirim', label: 'kirim — kirim angka ke Generator', kw: ['kirim', 'generator', 'pindah', 'transfer'] },
+  { cmd: 'rapor', label: 'rapor — ringkasan hasil belajar', kw: ['rapor', 'ringkasan', 'laporan', 'progres'] }
+];
+function suggestCommand(t){
+  let best = null, bestScore = 0;
+  CANON_CMDS.forEach(c => {
+    let score = 0;
+    c.kw.forEach(k => { if(t.indexOf(k) >= 0) score += k.length; });
+    if(score > bestScore){ bestScore = score; best = c; }
+  });
+  return bestScore >= 4 ? best : null; // ambang minimal supaya tidak asal tebak
+}
+
+// Ringkasan Formula X (posisi terpilih + 3 teratas) untuk konteks obrolan bebas — dibaca dari
+// formulax.js (FX_RECOMMENDATIONS/FX_SELECTED, dimuat SEBELUM aiMode.js). CATATAN: ini hasil
+// perhitungan Formula X untuk pasaran/periode yang SEDANG DIBUKA di tab Formula X — kalau beda
+// dari pasaran aktif di chat Mode Ai (A.cur), hasilnya bisa tidak nyambung; disebutkan apa adanya
+// supaya AI (dan Anda) tahu itu, bukan dianggap selalu sinkron.
+function formulaXSummary(){
+  if(typeof FX_RECOMMENDATIONS === 'undefined' || !FX_RECOMMENDATIONS) return 'Formula X: belum pernah dihitung di tab Formula X.';
+  const labels = Object.keys(FX_RECOMMENDATIONS);
+  if(!labels.length) return 'Formula X: belum pernah dihitung di tab Formula X.';
+  const lines = labels.map(label => {
+    const recs = FX_RECOMMENDATIONS[label] || [];
+    if(!recs.length) return 'Posisi ' + label + ': data belum cukup.';
+    const idx = (typeof FX_SELECTED[label] === 'number') ? FX_SELECTED[label] : 0;
+    const sel = recs[idx] || recs[0];
+    const alt = recs.slice(0, 3).map(r => r.label + ' ' + r.pct.toFixed(1) + '%').join(', ');
+    return 'Posisi ' + label + ': terpilih ' + sel.label + ' (' + sel.source + ') ' + sel.pct.toFixed(1) + '% dari ' + sel.hit + '/' + sel.total + ' uji. 3 teratas: ' + alt + '.';
+  });
+  return 'Formula X (hasil tab Formula X, pasaran/periode yang sedang dibuka di sana):\n' + lines.join('\n');
+}
+// Ringkasan konteks lengkap (histori + hasil aiBrain + Formula X) — disisipkan ke system prompt
+// tiap kali obrolan bebas dipanggil, supaya AI menjawab berdasar data nyata, bukan mengarang.
+function contextBlock(){
+  const ms = markets();
+  const parts = [];
+  if(A.cur && ms[A.cur]) parts.push('Pasaran aktif di chat: ' + A.cur + ' (' + ms[A.cur].C.length + ' data histori), OUT=' + A.out + '.');
+  else parts.push('Belum ada pasaran aktif dengan data yang cukup di chat.');
+  if(A.cur && A.states[A.cur]){
+    const ev = B.evalAll([A.states[A.cur]], A.out);
+    parts.push('Hasil belajar Ai (aiBrain) di pasaran ini: kena ' + ev.pct.toFixed(1) + '% dari ' + ev.n + ' uji, acak ' + ev.chance.toFixed(0) + '%, z=' + ev.z.toFixed(2) + '.');
+  } else {
+    parts.push('Ai belum pernah belajar pasaran ini (ketik "belajar").');
+  }
+  parts.push(formulaXSummary());
+  return parts.join('\n');
+}
+
+// Jalur cadangan "ngobrol bebas" — dipanggil HANYA kalau kalimat tidak cocok perintah
+// terstruktur manapun (dan tidak ada tebakan perintah yang layak). Lewat endpoint Worker
+// /api/ai-chat (Cloudflare Workers AI, gratis, tanpa API key di sisi browser).
+async function askAiChat(userText){
+  if(typeof fetch !== 'function') return say('Ai (obrolan bebas) tidak tersedia di browser ini.');
+  setBusy(true); setStatus('Ai sedang berpikir…');
+  try{
+    const sys = {
+      role: 'system',
+      content: 'Anda adalah Ai di sistem Analisa Frekuensi — asisten analisis statistik pribadi milik user. Anda HANYA membahas data di sistem ini: histori pasaran, hasil belajar Ai (aiBrain), dan hasil Formula X. Kalau ditanya topik di luar itu, tolak dengan sopan dan arahkan kembali ke topik analisa. JANGAN mengarang angka atau data yang tidak ada di konteks di bawah — kalau konteksnya kurang, katakan terus terang. Anda BUKAN peramal — untuk angka pasti, arahkan ke perintah "prediksi"/"uji". Jawab singkat, santai, Bahasa Indonesia.\n\nKONTEKS SAAT INI:\n' + contextBlock()
+    };
+    // Riwayat sebelum pesan ini (pesan terakhir A.chat sudah berisi userText sendiri — tidak diulang)
+    const hist = A.chat.slice(-9, -1).map(m => ({ role: m.who === 'user' ? 'user' : 'assistant', content: m.text }));
+    const messages = [sys].concat(hist, [{ role: 'user', content: userText }]);
+    const resp = await fetch('/api/ai-chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages })
+    });
+    const j = await resp.json();
+    say(j && j.ok ? (j.reply || '(jawaban kosong)') : '⚠️ Ai (obrolan bebas) gagal menjawab: ' + (j && j.error ? j.error : 'tidak diketahui'));
+  }catch(e){
+    say('⚠️ Gagal menghubungi otak Ai: ' + (e && e.message ? e.message : e));
+  }finally{
+    setBusy(false); renderAll();
+  }
+}
+
 async function run(text){
   const raw = String(text || '').trim(); if(!raw) return;
   say(raw, 'user');
-  const t = raw.toLowerCase();
+  return handle(raw);
+}
+
+async function handle(rawText){
+  const t = String(rawText || '').trim().toLowerCase(); if(!t) return;
   const ms = markets(); const cur = pickDefaultCur(ms); const L = (cur && ms[cur]) ? ms[cur].L : 4;
   let m;
+
+  // 1) Ada saran yang menunggu konfirmasi ("Maksud Anda...? ya/tidak")
+  if(A.pendingTeach){
+    const pt = A.pendingTeach; A.pendingTeach = null;
+    if(/^(ya|iya|y|benar|betul|ok|oke)$/.test(t)){
+      A.patterns[pt.phrase] = pt.cmd;
+      if(typeof AiMemory !== 'undefined') AiMemory.savePatterns(A.patterns);
+      say('Oke, sudah saya ingat — lain kali cukup ketik seperti itu lagi, saya langsung mengerti.');
+      return handle(pt.cmd);
+    }
+    if(/^(tidak|bukan|no|nggak|gak)$/.test(t)) return say('Baik, diabaikan. Ketik “bantuan” untuk lihat daftar perintah.');
+    // bukan jawaban ya/tidak — anggap ini perintah baru, lanjut proses seperti biasa di bawah
+  }
+
+  // 2) Kalimat yang sudah pernah "diajarkan" sebelumnya — langsung jalankan perintah aslinya
+  if(A.patterns[t]) return handle(A.patterns[t]);
+
   if(/^(bantuan|help|\?)$/.test(t)) return say(helpText());
   if((m = t.match(/^out\s+(reset|semua)$/))){ A.outPos = {}; A.out = 8; refreshPredict(true); return say('OUT dikembalikan ke 8 untuk semua posisi.'); }
   if((m = t.match(/^out\s+(?:([a-z])\s+)?([1-9])$/))){
@@ -186,7 +345,7 @@ async function run(text){
   if(/^belajar\s*semua/.test(t)) return learnAll();
   if(/^belajar/.test(t)){
     if(!cur) return say('Belum ada data pasaran.');
-    const r = learnOne(cur, ms); save(); refreshPredict(true);
+    const r = learnOne(cur, ms); save(); refreshPredict(true); persistBrain(cur, r.st);
     return say(cur + ': Ai sudah belajar sampai data ke-' + ms[cur].C.length + (r.newRows ? ' (+' + r.newRows + ' data baru)' : ' (tidak ada data baru)') + '.');
   }
   if(/^uji\s*semua/.test(t)){
@@ -204,7 +363,7 @@ async function run(text){
   }
   if(/^(eksperimen|lab)/.test(t)){
     const st = cur && A.states[cur]; if(!st) return say('Pasaran ini belum dipelajari. Ketik “belajar”.');
-    const r = B.forceLab(st, ms[cur].C); save(); refreshPredict(true);
+    const r = B.forceLab(st, ms[cur].C); save(); refreshPredict(true); persistBrain(cur, st);
     return say('Lab eksperimen ' + cur + ': mencoba ' + r.tried + ' gabungan pakar, diterima ' + r.admitted + ' (hanya yang untung nyata di data latih DAN validasi). ' + (r.admitted ? 'Kombinasi baru ikut dipertimbangkan, tapi bobotnya tetap ditentukan hasil nyata ke depan.' : 'Tidak ada yang lolos — itu wajar kalau datanya memang acak.'));
   }
   if((m = t.match(/^(?:kenapa|alasan|jelaskan)(?:\s+([a-z]))?/))){
@@ -243,11 +402,27 @@ async function run(text){
   }
   if(/^kirim/.test(t)) return sendToGenerator();
   if(/^rapor/.test(t)) return say(raporText());
-  say('Perintah belum saya kenali. Ketik “bantuan”.');
+  if((m = t.match(/^(?:tampilkan|lihat)\s+test\s+(.+)$/))){
+    const q = m[1].trim().toUpperCase();
+    const name = Object.keys(A.states).find(k => k.toUpperCase() === q);
+    if(!name) return say('Pasaran “' + m[1].trim() + '” belum pernah dipelajari Ai (tidak ada di ingatan). Ketik “belajar semua” dulu, atau buka datanya lalu ketik “belajar”.');
+    const st = A.states[name], rs = B.evalState(st, A.out);
+    const lines = rs.map(r => r.label + ': kena ' + r.pct.toFixed(1) + '% (acak ' + r.chance.toFixed(0) + '%) dari ' + r.n + ' uji, z=' + r.z.toFixed(2));
+    return say('Hasil test tersimpan untuk ' + name + ' (OUT ' + A.out + '), langsung dari ingatan — tidak dihitung ulang:\n' + lines.join('\n'));
+  }
+
+  // Tidak ada pola yang cocok — coba tebak dulu sebelum menyerah, supaya bisa "diajarkan"
+  const guess = suggestCommand(t);
+  if(guess){
+    A.pendingTeach = { phrase: t, cmd: guess.cmd };
+    return say('Perintah belum saya kenali. Maksud Anda “' + guess.label + '”? (jawab ya/tidak)');
+  }
+  // Bukan perintah & tidak mirip perintah manapun — anggap obrolan bebas, lempar ke otak Ai
+  return askAiChat(rawText);
 }
 
 function helpText(){
-  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• kirim (ke Generator) · rapor';
+  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• tampilkan test [pasaran] (dari ingatan, tanpa hitung ulang)\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• kirim (ke Generator) · rapor\n\nKalau kalimat Anda tidak mirip perintah manapun, saya coba tebak & tanya konfirmasi dulu (sekali dikonfirmasi, saya ingat terus). Kalau memang bukan perintah, saya jawab santai lewat obrolan bebas.';
 }
 function predText(r){
   return 'Pasaran ' + r.name + ' (' + r.n + ' data' + (r.newRows ? ', +' + r.newRows + ' baru dipelajari' : '') + '):\n' + r.pr.map(x => x.label + ' [' + x.digits.join(' ') + '] · peluang gabungan ' + (x.mass * 100).toFixed(1) + '% vs acak ' + (x.chance * 100).toFixed(0) + '%' + (x.wNull > 0.5 ? ' ≈ acak' : '')).join('\n') + '\n' + (r.pr.every(x => x.wNull > 0.5) ? 'Ai sendiri menilai belum ada pola yang terbukti di pasaran ini — angka di atas hampir setara pilihan acak.' : 'Selisih kecil dari acak itu normal; cek “uji” untuk bukti ke belakang.');
@@ -310,10 +485,15 @@ function importJson(file){
 // ---------- Tampilan ----------
 let card = null;
 function esc(s){ return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+let chatSyncTimer = null;
 function say(text, who){
   A.chat.push({ who: who || 'ai', text: String(text) });
   if(A.chat.length > 60) A.chat.shift();
   renderChat();
+  if(typeof AiMemory !== 'undefined'){
+    clearTimeout(chatSyncTimer);
+    chatSyncTimer = setTimeout(() => AiMemory.saveChat(A.chat), 1200); // ditunda dikit, kalau say() dipanggil beruntun cukup 1x kirim
+  }
 }
 function setStatus(t){ const el = card && card.querySelector('#aimStatus'); if(el) el.textContent = t; }
 function setBusy(b){ if(card) card.querySelectorAll('button').forEach(x => { x.disabled = b; }); }
@@ -416,11 +596,16 @@ function syncData(force){
   const first = !A.sig; A.sig = s;
   const before = A.cur && A.states[A.cur] ? A.states[A.cur].t : 0;
   const r = predictCur(); renderAll();
-  if(r && A.states[r.name]){ save(); if(!first && r.newRows > 0) say('Data baru di ' + r.name + ' (+' + r.newRows + '). Ai sudah belajar lanjutan dan memperbarui angka.'); }
+  if(r && A.states[r.name]){
+    save();
+    if(!first && r.newRows > 0){
+      say('Data baru di ' + r.name + ' (+' + r.newRows + '). Ai sudah belajar lanjutan dan memperbarui angka.');
+      persistBrainSoon(r.name); // otomatis, bukan diminta manual — cukup dicatat, tidak perlu buru-buru
+    }
+  }
 }
 
 function init(){
-  load();
   buildCard();
   addPill('modeAiBtn', 'modeAiBtnHome');
   const b = document.getElementById('modeAiBtn'); if(b) b.addEventListener('click', () => showModeView('ai'));
@@ -432,9 +617,15 @@ function init(){
     wrapped.__aiWrapped = true;
     window.showModeView = wrapped;
   }
-  say('Halo! Saya Ai. Beri tahu OUT yang Anda mau (mis. “out 6”), lalu “belajar semua” supaya saya mempelajari semua pasaran. Ketik “bantuan” untuk daftar perintah. Saya akan jujur menunjukkan hasil ujinya — termasuk kalau datanya ternyata belum punya pola.');
-  setInterval(() => syncData(false), 2000);
+  setStatus('Memuat ingatan…');
   renderAll();
+  load().then(() => {
+    say(A.chat.length
+      ? 'Selamat datang kembali — ingatan sebelumnya sudah dimuat. Ketik “bantuan” untuk daftar perintah.'
+      : 'Halo! Saya Ai. Beri tahu OUT yang Anda mau (mis. “out 6”), lalu “belajar semua” supaya saya mempelajari semua pasaran. Ketik “bantuan” untuk daftar perintah. Saya akan jujur menunjukkan hasil ujinya — termasuk kalau datanya ternyata belum punya pola.');
+    setInterval(() => syncData(false), 2000);
+    renderAll();
+  });
 }
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
