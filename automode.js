@@ -61,9 +61,9 @@ let fxGen1FormulaInfo = {};
 // ── State Gen 2 (A/B/C) ──
 const FX_GEN2_SLOTS = ['A','B','C'];
 const fxGen2State = {
-  A: { locked:false, pools:null, posLabels:null, fp:'', rule:null, method:'manual', formulaInfo:null },
-  B: { locked:false, pools:null, posLabels:null, fp:'', rule:null, method:'manual', formulaInfo:null },
-  C: { locked:false, pools:null, posLabels:null, fp:'', rule:null, method:'manual', formulaInfo:null },
+  A: { locked:false, pools:null, posLabels:null, fp:'', rule:null, picks:null, method:'manual', formulaInfo:null },
+  B: { locked:false, pools:null, posLabels:null, fp:'', rule:null, picks:null, method:'manual', formulaInfo:null },
+  C: { locked:false, pools:null, posLabels:null, fp:'', rule:null, picks:null, method:'manual', formulaInfo:null },
 };
 // Track Gen 2 formula info per slot dan posisi: { slot: { posLabel: {label, pct, hit, total}, ... }, ... }
 let fxGen2FormulaInfo = { A: {}, B: {}, C: {} };
@@ -88,7 +88,8 @@ function getGen1RuleInfo(){
   return {
     trendN: trendEl ? trendEl.value : '-',
     controlN: controlEl ? controlEl.value : '-',
-    outN: outEl ? outEl.value : '-'
+    outN: outEl ? outEl.value : '-',
+    stats: fxGen1LiveStats() // Ps/Sr live (belum terkunci -> ikut radio Formula X yang sedang aktif)
   };
 }
 
@@ -99,8 +100,111 @@ function captureGen1RuleNow(){
   return {
     trendN: document.getElementById('fxTrendN').value,
     controlN: document.getElementById('fxControlN').value,
-    outN: document.getElementById('fxOutN').value
+    outN: document.getElementById('fxOutN').value,
+    stats: fxGen1LiveStats() // Ps/Sr ikut dibekukan PERSIS saat dikunci (null = data kurang)
   };
+}
+
+// ─── Ps & Sr GABUNGAN (info baris "Tn · Cn · Ot" di kartu Gen 1 / Gen 2) ────
+// Definisi SAMA PERSIS dengan kolom Pss% dan Status di Tabel Kombinasi ACKE (formulax.js):
+//   Ps = akurasi gabungan (fxJointAccuracy) — semua posisi harus kena BERSAMAAN di baris yang sama
+//   Sr = sukses beruntun gabungan dari baris terbaru (fxJointStreak), batas atas = Tn (maks FX_STREAK_HARD_CAP)
+// Kalau datanya tidak cukup / formula tidak ketemu -> return null (ditampilkan "Ps/Sr:data kurang"),
+// TIDAK PERNAH diganti angka dari sumber lain.
+function fxNFromRaw(raw){ return raw === 'all' ? Infinity : parseInt(raw, 10); }
+
+function fxJointStatsFor(picks, posLabels, used, formulas, controlN, trendN, outN){
+  if(!picks || !posLabels || !posLabels.length || !used || !used.length || !formulas) return null;
+  if(!(controlN > 0) || !(trendN > 0) || !Number.isInteger(outN) || outN < 1) return null; // NaN/kosong -> berhenti
+  const byKey = {};
+  formulas.forEach(f => { byKey[f.key] = f; });
+  const selFn = posLabels.map(l => byKey[picks[l]]);
+  if(selFn.some(f => !f)) return null;
+  const maxStreak = (trendN === Infinity) ? FX_STREAK_HARD_CAP : Math.min(trendN, FX_STREAK_HARD_CAP);
+  const chronoNum = used.slice().reverse();
+  const prevOutN = FX_OUT_N;
+  FX_OUT_N = outN; // pool tiap formula dipotong pakai FX_OUT_N — dipulihkan lagi di finally
+  try{
+    const r = fxJointAccuracy(selFn, posLabels, chronoNum, controlN);
+    if(!r.total) return null;
+    return { pct: r.pct, success: r.success, total: r.total, streak: fxJointStreak(selFn, posLabels, chronoNum, controlN, maxStreak) };
+  }catch(e){
+    return null;
+  } finally {
+    FX_OUT_N = prevOutN;
+  }
+}
+
+// Gen 1 — dari radio Formula X per posisi yang sedang aktif SEKARANG (sama dengan sumber fxBuildGen1Pools).
+function fxGen1LiveStats(){
+  if(!FX_FORMULAS_CACHE || !FX_RECOMMENDATIONS || !lastPosLabels || !lastPosLabels.length || !lastHistoryNumbers.length) return null;
+  const picks = {};
+  for(const label of lastPosLabels){
+    const key = fxSelectedKey(label);
+    if(!key) return null;
+    picks[label] = key;
+  }
+  const trendEl = document.getElementById('fxTrendN');
+  return fxJointStatsFor(picks, lastPosLabels, lastHistoryNumbers, FX_FORMULAS_CACHE.formulas,
+    FX_FORMULAS_CACHE.controlN, trendEl ? fxNFromRaw(trendEl.value) : NaN, FX_OUT_N);
+}
+
+// Gen 2 belum terkunci — dari Formula X yang sedang tampil di layar + peringkat terburuk slot itu.
+function fxGen2LiveStats(slot){
+  if(!FX_FORMULAS_CACHE || !FX_RECOMMENDATIONS || !lastPosLabels || !lastPosLabels.length || !lastHistoryNumbers.length) return null;
+  const lockedPosition = fxFindGen2LockedPosition(lastPosLabels, FX_RECOMMENDATIONS);
+  const picks = {};
+  for(const label of lastPosLabels){
+    const chosen = fxPickGen2Rec(slot, label, FX_RECOMMENDATIONS[label] || [], lockedPosition);
+    if(!chosen) return null;
+    picks[label] = chosen.key;
+  }
+  const trendEl = document.getElementById('fxTrendN');
+  return fxJointStatsFor(picks, lastPosLabels, lastHistoryNumbers, FX_FORMULAS_CACHE.formulas,
+    FX_FORMULAS_CACHE.controlN, trendEl ? fxNFromRaw(trendEl.value) : NaN, FX_OUT_N);
+}
+
+// Gen 2 terkunci — dihitung dari rule milik slot itu sendiri (Tn/Cn/Ot tersimpan) + kombinasi formula yang
+// BENAR-BENAR dipakai (s.picks kalau dikunci lewat Auto%, selain itu peringkat terburuk slotnya).
+// Di-cache per (slot, data, rule, picks) supaya render ulang tidak menghitung dari nol tiap kali.
+const fxGen2StatsCache = {};
+function fxGen2StatsForSlot(slot, s, used){
+  if(!s || !s.rule || !s.posLabels || !used || !used.length) return null;
+  const key = [slot, dataFingerprint(used), s.posLabels.join(''), s.rule.trendN, s.rule.controlN, s.rule.outN, s.picks ? JSON.stringify(s.picks) : 'rank'].join('|');
+  if(key in fxGen2StatsCache) return fxGen2StatsCache[key];
+  let stats = null;
+  try{
+    const { recs, formulas } = computeFormulaXPure(used, s.posLabels, s.rule.trendN, s.rule.controlN, s.rule.outN);
+    let picks = s.picks;
+    if(!picks){
+      picks = {};
+      const lockedPosition = fxFindGen2LockedPosition(s.posLabels, recs);
+      for(const label of s.posLabels){
+        const chosen = fxPickGen2Rec(slot, label, recs[label] || [], lockedPosition);
+        if(!chosen){ picks = null; break; }
+        picks[label] = chosen.key;
+      }
+    }
+    if(picks) stats = fxJointStatsFor(picks, s.posLabels, used, formulas, fxNFromRaw(s.rule.controlN), fxNFromRaw(s.rule.trendN), parseInt(s.rule.outN, 10));
+  }catch(e){ stats = null; }
+  if(Object.keys(fxGen2StatsCache).length > 30) Object.keys(fxGen2StatsCache).forEach(k => delete fxGen2StatsCache[k]);
+  fxGen2StatsCache[key] = stats;
+  return stats;
+}
+
+// Teks Ps/Sr: "Ps:62,5% · Sr:4x". stats === '-' -> tidak berlaku (Gen 1 dari angka bahan manual/Semi Auto).
+function fxStatsTxt(stats){
+  if(stats === '-') return 'Ps:- · Sr:-';
+  if(!stats) return 'Ps/Sr:data kurang';
+  return `Ps:${stats.pct.toFixed(1).replace('.', ',')}% · Sr:${stats.streak}x`;
+}
+
+// Baris info: "Tn:30 · Cn:10 · Ot:8 · Ps:62,5% · Sr:4x"
+function fxRuleLineTxt(rule, stats){
+  const r = rule || {};
+  const t = r.trendN === 'all' ? 'semua' : (r.trendN ?? '-');
+  const c = r.controlN === 'all' ? 'semua' : (r.controlN ?? '-');
+  return `Tn:${t} · Cn:${c} · Ot:${r.outN ?? '-'} · ${fxStatsTxt(stats)}`;
 }
 
 // ─── Helper: Ambil info formula (label, source, persentase) untuk satu posisi ────
@@ -342,6 +446,7 @@ function fxApplyGen2Rule(slot){
   s.pools = pools;
   s.posLabels = lastPosLabels.slice();
   s.fp = dataFingerprint(lastHistoryNumbers);
+  s.picks = null; // dihitung ulang lewat peringkat terburuk slot (bukan pilihan Auto%)
   s.formulaInfo = buildGen2FormulaInfoForSlot(slot, lastPosLabels, lastHistoryNumbers, s.rule);
   return true;
 }
@@ -435,9 +540,7 @@ function renderGen1LockUI(){
     // Tampilkan rule info
     if(ruleInfo){
       const rule = getGen1RuleInfo();
-      const trendTxt = rule.trendN === 'all' ? 'semua' : rule.trendN;
-      const controlTxt = rule.controlN === 'all' ? 'semua' : rule.controlN;
-      ruleInfo.textContent = `Tren N:${trendTxt} · Control N:${controlTxt} · Out N:${rule.outN}`;
+      ruleInfo.textContent = fxRuleLineTxt(rule, rule.stats);
     }
   } else {
     btn.textContent = '🔒 LOCK GEN 1';
@@ -453,9 +556,7 @@ function renderGen1LockUI(){
     // Tampilkan rule info
     if(ruleInfo){
       const rule = getGen1RuleInfo();
-      const trendTxt = rule.trendN === 'all' ? 'semua' : rule.trendN;
-      const controlTxt = rule.controlN === 'all' ? 'semua' : rule.controlN;
-      ruleInfo.textContent = `Tren N:${trendTxt} · Control N:${controlTxt} · Out N:${rule.outN}`;
+      ruleInfo.textContent = fxRuleLineTxt(rule, rule.stats);
     }
   }
 }
@@ -491,10 +592,8 @@ function renderGen2LockUI(slot){
     if(!Object.keys(lockedFormulaInfo).length && s.formulaInfo) lockedFormulaInfo = s.formulaInfo;
     renderDigitsRow('fxGen2'+slot+'DigitsRow', s.pools, s.posLabels, 'var(--rose)', lockedFormulaInfo);
     if(info){
-      const r = s.rule || {};
-      const trendTxt = r.trendN === 'all' ? 'semua' : r.trendN;
-      const controlTxt = r.controlN === 'all' ? 'semua' : r.controlN;
-      info.textContent = `Tren N:${trendTxt} · Control N:${controlTxt} · Out N:${r.outN} · peringkat ${rankLabel}`;
+      const ruleTxt = fxRuleLineTxt(s.rule, fxGen2StatsForSlot(slot, s, lastHistoryNumbers));
+      info.textContent = `${ruleTxt} · peringkat ${rankLabel}`;
     }
   } else {
     btn.textContent = '🔒 LOCK 2'+slot;
@@ -502,7 +601,7 @@ function renderGen2LockUI(slot){
     badge.style.display = 'none';
     note.style.display  = 'none';
     card.style.borderColor = 'rgba(217,112,122,.4)';
-    if(info) info.textContent = `Akan pakai Tren/Control/Out yang sedang tampil di layar · peringkat ${rankLabel}`;
+    if(info) info.textContent = `Akan pakai Tn/Cn/Ot yang sedang tampil di layar · ${fxStatsTxt(fxGen2LiveStats(slot))} · peringkat ${rankLabel}`;
     // Tampilkan live preview Gen 2 (angka peringkat terburuk ke-N sesuai slot ini)
     if(lastPosLabels && lastHistoryNumbers.length && FX_RECOMMENDATIONS){
       const pools = fxBuildGen2PoolsLive(slot, lastPosLabels, lastHistoryNumbers);
@@ -670,6 +769,7 @@ function fxAutoLockGen2FromAutoPercent(){
       // sebelumnya). Ini yang dibaca renderGen2LockUI/statusGen2SlotData untuk ditampilkan, jadi
       // tanpa baris ini info yang muncul selalu basi walau pool di atas sudah benar.
       s.rule = { trendN: worstN.trendN, controlN: worstN.controlN, outN: outNRaw };
+      s.picks = { ...combo.picks }; // kombinasi formula yang BENAR-BENAR dipakai (untuk Ps/Sr)
       // NB: jalur Auto% ini pakai pemilihan formula terpisah (kombinasi Wilson per posisi,
       // bukan fxPickGen2Rec/WORST_RANK_BY_SLOT), jadi belum dihitungkan formulaInfo yang presis
       // di sini — dikosongkan supaya render jatuh ke fallback, bukan menampilkan info basi.
@@ -791,6 +891,7 @@ document.querySelectorAll('.fxGen2LockBtn').forEach(btn => {
       if(!p || p.some(x=>!x.length)){ alert('Peringkat terburuk ke-'+WORST_RANK_BY_SLOT[slot]+' belum tersedia untuk salah satu posisi — coba Hitung Ulang dulu.'); return; }
       s.locked=true; s.pools=p; s.posLabels=lastPosLabels.slice(); s.fp=dataFingerprint(lastHistoryNumbers);
       s.formulaInfo = buildGen2FormulaInfoLive(slot, lastPosLabels);
+      s.picks = null; // peringkat terburuk slot (bukan pilihan Auto%)
       // Simpan Tren N/Control N/Out N saat ini — supaya slot ini bisa dihitung ulang persis
       // dengan kombinasi yang sama kalau data/periode berganti atau preset dimuat lagi.
       // Peringkat terburuk (WORST_RANK_BY_SLOT) sudah tetap mengikuti slotnya sendiri.
@@ -1421,7 +1522,7 @@ document.getElementById('semiAutoActivateBtn').addEventListener('click', ()=>{
   // Angka Bahan diisi manual (bukan dari Formula X/Auto%), jadi Tren N/Control N/Out N
   // tidak relevan di sini — tandai eksplisit supaya tidak ikut menampilkan sisa nilai
   // live #fxTrendN/#fxControlN yang kebetulan sedang aktif (yang tidak ada hubungannya).
-  fxGen1LockedRule = { trendN: '-', controlN: '-', outN: '-' };
+  fxGen1LockedRule = { trendN: '-', controlN: '-', outN: '-', stats: '-' };
   renderGen1LockUI();
 
   setAppMode('semi');
