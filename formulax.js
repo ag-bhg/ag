@@ -1,5 +1,5 @@
 // ===================== FORMULA X =====================
-// Formula X: 5 formula dasar + optimizer (Auto%/Posisi%/Streak%), Tabel Kombinasi ACKE,
+// Formula X: 7 formula dasar (NRL, ML, MB, IDX, BHG, PK, RDM) + optimizer (Auto%/Posisi%/Streak%), Tabel Kombinasi ACKE,
 // Angka Hasil Tren, Top Posisi, Tabel Backtest, dan pengisian Generator (fxApplyToGenerator).
 // Dimuat SETELAH formula.js (memakai setupSectionToggle, lastTop8Pools, filterCustomSource dari sana).
 
@@ -126,17 +126,42 @@ function computeModeAnalysis(used, targetLen, map){
 }
 
 // ---------- Formula X ----------
-// 5 formula dasar: 4 formula statistik (delta riwayat posisi sumber) + 1 formula BHG (Naik4Turun3, dari digit terakhir langsung).
+// Formula dasar: 4 formula statistik (delta riwayat posisi sumber) + BHG (Naik4Turun3, dari digit terakhir langsung)
+// + PK (Pola Kemunculan) + RDM (pool acak berpatokan digit terakhir posisi sumber, lihat rdmPoolFromDigit).
 const FX_BASES = [
   { code:'NRL', map: DIGIT_MAPS.normal,     kind:'stat' },
   { code:'ML',  map: DIGIT_MAPS.mistikLama, kind:'stat' },
   { code:'MB',  map: DIGIT_MAPS.mistikBaru, kind:'stat' },
   { code:'IDX', map: DIGIT_MAPS.index,      kind:'stat' },
   { code:'BHG', map: null,                  kind:'bhg'  },
-  { code:'PK',  map: null,                  kind:'pk'   }
+  { code:'PK',  map: null,                  kind:'pk'   },
+  { code:'RDM', map: null,                  kind:'rdm'  }
 ];
 
 function mod10(x){ return ((x % 10) + 10) % 10; }
+
+// RDM / Random terikat digit: pool = OUT digit ACAK, dengan digit yang keluar di posisi sumber (draw terbaru)
+// hanya jadi ACUAN/seed-nya — digit itu sendiri TIDAK otomatis masuk pool. Contoh: A keluar 1 -> pool RDM_A
+// diacak dari "A angka 1"; C keluar 2 -> pool RDM_C diacak dari "C angka 2"; K keluar 3, E keluar 4 dst.
+// DETERMINISTIK (pseudo-random dengan seed = posisi sumber + digit acuan, bukan Math.random) supaya backtest,
+// Pss%/Status, Tabel Kombinasi, dan pool Generator selalu memberi hasil yang SAMA untuk data yang sama.
+// Pool untuk OUT lebih kecil selalu bagian dari pool OUT lebih besar (urutan acak yang sama, dipotong FX_OUT_N).
+function rdmPoolFromDigit(sIdx, digit){
+  let a = (((sIdx + 1) * 7919) + (digit * 104729) + 12345) >>> 0; // seed mulberry32
+  const rnd = () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+  for(let i = digits.length - 1; i > 0; i--){
+    const j = Math.floor(rnd() * (i + 1));
+    [digits[i], digits[j]] = [digits[j], digits[i]];
+  }
+  return digits.slice(0, FX_OUT_N).sort((x, y) => x - y).map(String);
+}
 
 // BHG / Naik4Turun3: dari 1 digit terakhir, ambil sebagian naik + digit itu sendiri + sisanya turun = OUT kandidat.
 // Standar OUT=8 -> 4 naik + digit itu sendiri + 3 turun (perilaku lama tetap sama).
@@ -204,6 +229,13 @@ function fxBuildFormulaList(posLabels, controlN){
             const pool = statPoolsAllSources(windowNewestFirst.slice(0, controlN), base.map, targetLen)[sIdx];
             return posLabels.map(() => pool);
           }
+          if(base.kind === 'rdm'){
+            // RDM: cukup 1 data (acuannya digit terakhir posisi sumber). Digit tidak valid -> error (berhenti), bukan ditebak.
+            const d = windowNewestFirst.length ? parseInt(windowNewestFirst[0][sIdx], 10) : NaN;
+            if(!Number.isInteger(d) || d < 0 || d > 9) throw new Error('Data RDM: digit terakhir posisi ' + sourceLabel + ' tidak valid.');
+            const pool = rdmPoolFromDigit(sIdx, d);
+            return posLabels.map(() => pool);
+          }
           // PK/BHG: butuh minimal FX_BHG_PK_MIN data, baca maksimal FX_BHG_PK_MAX data terbaru.
           if(windowNewestFirst.length < FX_BHG_PK_MIN) throw new Error('Data PK/BHG belum cukup (minimal 19).');
           const win = windowNewestFirst.slice(0, FX_BHG_PK_MAX);
@@ -265,7 +297,7 @@ function fxGetPosisiTopN(){
 // sama) untuk satu kombinasi formula tertentu. Logikanya identik dengan renderFxBacktestTable,
 // tapi dilepas dari FX_SELECTED supaya bisa dipakai menguji kombinasi yang belum tentu aktif di radio.
 function fxJointAccuracy(selFn, posLabels, chronoNum, controlN){
-  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (controlN === Infinity ? 1 : controlN)));
+  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (f.kind === 'rdm' ? 1 : (controlN === Infinity ? 1 : controlN))));
   let success = 0, total = 0;
   for(let i = minNeeded; i < chronoNum.length; i++){
     const windowNewestFirst = chronoNum.slice(0, i).slice().reverse();
@@ -318,7 +350,7 @@ function fxStreakAccuracy(formula, chronoNum, controlN, posIdx, maxStreak){
 // baris terbaru) alih-alih menjumlah semua transisi. Dipakai untuk menilai 1 kombinasi lengkap
 // (A+C+K+E) yang sudah dipilih dari hasil pencarian kombinasi di bawah.
 function fxJointStreak(selFn, posLabels, chronoNum, controlN, maxStreak){
-  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (controlN === Infinity ? 1 : controlN)));
+  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (f.kind === 'rdm' ? 1 : (controlN === Infinity ? 1 : controlN))));
   let streak = 0;
   for(let i = chronoNum.length - 1; i >= minNeeded && streak < maxStreak; i--){
     const windowNewestFirst = chronoNum.slice(0, i).slice().reverse();
@@ -1495,7 +1527,7 @@ function renderFxBacktestTable(posLabels, used){
   }
 
   const controlN = FX_FORMULAS_CACHE.controlN;
-  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (controlN === Infinity ? 1 : controlN)));
+  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (f.kind === 'rdm' ? 1 : (controlN === Infinity ? 1 : controlN))));
   const chronoNum = used.slice().reverse(); // lama -> baru
 
   let success = 0, fail = 0;
