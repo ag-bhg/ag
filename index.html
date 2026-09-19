@@ -525,9 +525,12 @@
             <option value="100">100</option>
           </select>
         </div>
-        <div style="flex:1; min-width:140px;">
-          <label style="display:block; font-size:10.5px; color:var(--ink-dim); margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em; text-align:center;">Jumlah Output Ai</label>
-          <select id="aiDigitCount" class="aiWinSelect" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:13px; font-weight:700; padding:8px 4px; border-radius:8px; text-align:center;">
+      </div>
+
+      <div class="row" style="margin-top:2px; margin-bottom:10px; gap:10px;">
+        <div style="flex:1; min-width:90px;">
+          <label style="display:block; font-size:10.5px; color:var(--ink-dim); margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em; text-align:center;">Ai AC</label>
+          <select id="aiDigitCount" class="aiWinSelect" title="Jumlah Output Ai AC" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:12px; font-weight:700; padding:6px 4px; border-radius:8px; text-align:center; margin-bottom:6px;">
             <option value="2">2</option>
             <option value="3">3</option>
             <option value="4">4</option>
@@ -537,22 +540,36 @@
             <option value="8">8</option>
             <option value="9">9</option>
           </select>
-        </div>
-      </div>
-
-      <div class="row" style="margin-top:2px; margin-bottom:10px; gap:10px;">
-        <div style="flex:1; min-width:90px;">
-          <label style="display:block; font-size:10.5px; color:var(--ink-dim); margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em; text-align:center;">Ai AC</label>
           <input type="text" id="aiWinACManual" class="aiWinManual" placeholder="Ai manual (4-9 digit)" maxlength="9" inputmode="numeric" autocomplete="off">
           <button class="btn" id="cariAiACBtn" style="width:100%; margin-top:6px; font-size:12px; padding:6px 4px;">🔎 Cari Ai (cover data)</button>
         </div>
         <div style="flex:1; min-width:90px;">
           <label style="display:block; font-size:10.5px; color:var(--ink-dim); margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em; text-align:center;">Ai CK</label>
+          <select id="aiDigitCountCK" class="aiWinSelect" title="Jumlah Output Ai CK" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:12px; font-weight:700; padding:6px 4px; border-radius:8px; text-align:center; margin-bottom:6px;">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6" selected>6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+          </select>
           <input type="text" id="aiWinCKManual" class="aiWinManual" placeholder="Ai manual (4-9 digit)" maxlength="9" inputmode="numeric" autocomplete="off">
           <button class="btn" id="cariAiCKBtn" style="width:100%; margin-top:6px; font-size:12px; padding:6px 4px;">🔎 Cari Ai (cover data)</button>
         </div>
         <div style="flex:1; min-width:90px;">
           <label style="display:block; font-size:10.5px; color:var(--ink-dim); margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em; text-align:center;">Ai KE</label>
+          <select id="aiDigitCountKE" class="aiWinSelect" title="Jumlah Output Ai KE" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-family:var(--mono); font-size:12px; font-weight:700; padding:6px 4px; border-radius:8px; text-align:center; margin-bottom:6px;">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6" selected>6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+          </select>
           <input type="text" id="aiWinKEManual" class="aiWinManual" placeholder="Ai manual (4-9 digit)" maxlength="9" inputmode="numeric" autocomplete="off">
           <button class="btn" id="cariAiKEBtn" style="width:100%; margin-top:6px; font-size:12px; padding:6px 4px;">🔎 Cari Ai (cover data)</button>
         </div>
@@ -1005,6 +1022,7 @@
 <script src="database.js"></script>
 <script src="historyall.js"></script>
 <script src="formula.js"></script>
+<script src="formulax.js"></script>
 <script src="generator.js"></script>
 <script src="automode.js"></script>
 <script src="rekap.js"></script>
@@ -1086,7 +1104,9 @@ function statusGen2SlotData(slot){
 // "Filter yang di pilih" — data mentah tiap filter
 function statusFilterAiData(){
   const tabel = document.getElementById('aiRowsShown')?.value || '-';
-  const out = (typeof getAiDigitCount === 'function') ? getAiDigitCount() : (document.getElementById('aiDigitCount')?.value || '-');
+  const parts = ['AC', 'CK', 'KE'];
+  const outs = parts.map(p => (typeof getAiDigitCount === 'function') ? getAiDigitCount(p) : null).map(v => v === null ? '-' : v);
+  const out = outs.every(v => v === outs[0]) ? String(outs[0]) : parts.map((p, i) => p + ':' + outs[i]).join(' ');
   return { tabel, out };
 }
 function statusFilterShioData(){
