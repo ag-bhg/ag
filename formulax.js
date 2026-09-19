@@ -1,5 +1,5 @@
 // ===================== FORMULA X =====================
-// Formula X: 7 formula dasar (NRL, ML, MB, IDX, BHG, PK, RDM) + optimizer (Auto%/Posisi%/Streak%), Tabel Kombinasi ACKE,
+// Formula X: 8 formula dasar (NRL, ML, MB, IDX, BHG, PK, RDM, AI) + optimizer (Auto%/Posisi%/Streak%), Tabel Kombinasi ACKE,
 // Angka Hasil Tren, Top Posisi, Tabel Backtest, dan pengisian Generator (fxApplyToGenerator).
 // Dimuat SETELAH formula.js (memakai setupSectionToggle, lastTop8Pools, filterCustomSource dari sana).
 
@@ -212,6 +212,19 @@ function pkPoolsAllSources(windowNewestFirst, targetLen){
 const FX_BHG_PK_MIN = 19;
 const FX_BHG_PK_MAX = 29;
 
+// AI (ai.js): model dilatih jalan-maju dari riwayat, jadi butuh data lebih banyak. Kurang dari ini -> formula AI
+// tidak dihitung (statusnya diberitahukan di teks status Formula X), bukan ditebak dari data seadanya.
+const FX_AI_MIN_ROWS = 50;
+
+// Minimal baris data yang dibutuhkan satu formula. joint=true -> untuk hitungan gabungan (formula statistik
+// butuh Control N baris penuh); joint=false -> untuk uji per-formula (statistik cukup 1 baris).
+function fxMinRowsFor(f, controlN, joint){
+  if(f.kind === 'bhg' || f.kind === 'pk') return FX_BHG_PK_MIN;
+  if(f.kind === 'ai') return FX_AI_MIN_ROWS;
+  if(f.kind === 'rdm' || !joint) return 1;
+  return controlN === Infinity ? 1 : controlN;
+}
+
 // Susun daftar varian formula: tiap base x tiap posisi-sumber = 1 varian. fn(windowNewestFirst) -> pool per posisi target (sama untuk semua posisi, diambil dari 1 posisi sumber).
 // controlN = jendela data untuk formula statistik (NRL/ML/MB/IDX). PK/BHG memakai FX_BHG_PK_MIN..FX_BHG_PK_MAX otomatis.
 function fxBuildFormulaList(posLabels, controlN){
@@ -247,12 +260,23 @@ function fxBuildFormulaList(posLabels, controlN){
       });
     });
   });
+  // AI (ai.js): SATU varian saja — tiap posisi target punya model sendiri (bukan per posisi sumber seperti
+  // formula lain), jadi fn mengembalikan pool yang BERBEDA untuk tiap posisi.
+  if(typeof aiPoolsFromWindow === 'function'){
+    list.push({
+      key: 'AI_ALL',
+      label: 'AI',
+      source: posLabels.join(''),
+      kind: 'ai',
+      fn: (windowNewestFirst) => aiPoolsFromWindow(windowNewestFirst, targetLen)
+    });
+  }
   return list;
 }
 
 // Uji akurasi tren: geser mundur dari data terbaru, tiap langkah pakai window sebelumnya untuk menebak 1 data berikutnya, sampai N transisi terkumpul.
 function fxTrendAccuracy(formula, chronoNum, controlN, trendN, posIdx){
-  const minNeeded = (formula.kind === 'bhg' || formula.kind === 'pk') ? FX_BHG_PK_MIN : Math.min(controlN, 1);
+  const minNeeded = fxMinRowsFor(formula, controlN, false);
   let hit = 0, total = 0;
   for(let i = chronoNum.length - 1; i >= 1 && total < trendN; i--){
     const available = chronoNum.slice(0, i);
@@ -297,7 +321,7 @@ function fxGetPosisiTopN(){
 // sama) untuk satu kombinasi formula tertentu. Logikanya identik dengan renderFxBacktestTable,
 // tapi dilepas dari FX_SELECTED supaya bisa dipakai menguji kombinasi yang belum tentu aktif di radio.
 function fxJointAccuracy(selFn, posLabels, chronoNum, controlN){
-  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (f.kind === 'rdm' ? 1 : (controlN === Infinity ? 1 : controlN))));
+  const minNeeded = Math.max(...selFn.map(f => fxMinRowsFor(f, controlN, true)));
   let success = 0, total = 0;
   for(let i = minNeeded; i < chronoNum.length; i++){
     const windowNewestFirst = chronoNum.slice(0, i).slice().reverse();
@@ -329,7 +353,7 @@ const FX_STREAK_HARD_CAP = 100; // batas mutlak (dipakai kalau Tren N = "semua"/
 // sebelum dikombinasikan (sama seperti fxTrendAccuracy dipakai menyaring FX_POSISI_TOP_N).
 // maxStreak = batas atas hitung mundur, diambil dari Tren N yang sedang aktif di dropdown.
 function fxStreakAccuracy(formula, chronoNum, controlN, posIdx, maxStreak){
-  const minNeeded = (formula.kind === 'bhg' || formula.kind === 'pk') ? FX_BHG_PK_MIN : Math.min(controlN, 1);
+  const minNeeded = fxMinRowsFor(formula, controlN, false);
   let streak = 0;
   for(let i = chronoNum.length - 1; i >= 1 && streak < maxStreak; i--){
     const available = chronoNum.slice(0, i);
@@ -350,7 +374,7 @@ function fxStreakAccuracy(formula, chronoNum, controlN, posIdx, maxStreak){
 // baris terbaru) alih-alih menjumlah semua transisi. Dipakai untuk menilai 1 kombinasi lengkap
 // (A+C+K+E) yang sudah dipilih dari hasil pencarian kombinasi di bawah.
 function fxJointStreak(selFn, posLabels, chronoNum, controlN, maxStreak){
-  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (f.kind === 'rdm' ? 1 : (controlN === Infinity ? 1 : controlN))));
+  const minNeeded = Math.max(...selFn.map(f => fxMinRowsFor(f, controlN, true)));
   let streak = 0;
   for(let i = chronoNum.length - 1; i >= minNeeded && streak < maxStreak; i--){
     const windowNewestFirst = chronoNum.slice(0, i).slice().reverse();
@@ -995,7 +1019,9 @@ function computeFormulaX(used, posLabels){
   const controlNDisplay = controlN === Infinity ? 'seluruh' : controlN;
   if(anyData){
     status.style.color = 'var(--teal)';
-    status.textContent = `Akurasi dihitung dari maksimal ${trendNDisplay} transisi terakhir per varian (kontrol ${controlNDisplay}, PK/BHG otomatis ${FX_BHG_PK_MIN}-${FX_BHG_PK_MAX}).`;
+    const aiNote = (typeof aiPoolsFromWindow === 'function' && used.length < FX_AI_MIN_ROWS)
+      ? ` ⚠️ AI tidak dihitung: data ${used.length} kurang dari minimal ${FX_AI_MIN_ROWS}.` : '';
+    status.textContent = `Akurasi dihitung dari maksimal ${trendNDisplay} transisi terakhir per varian (kontrol ${controlNDisplay}, PK/BHG otomatis ${FX_BHG_PK_MIN}-${FX_BHG_PK_MAX}).` + aiNote;
   } else {
     status.style.color = 'var(--rose)';
     status.textContent = 'Data historis belum cukup untuk menghitung tren Formula X.';
@@ -1527,7 +1553,7 @@ function renderFxBacktestTable(posLabels, used){
   }
 
   const controlN = FX_FORMULAS_CACHE.controlN;
-  const minNeeded = Math.max(...selFn.map(f => (f.kind === 'bhg' || f.kind === 'pk') ? FX_BHG_PK_MIN : (f.kind === 'rdm' ? 1 : (controlN === Infinity ? 1 : controlN))));
+  const minNeeded = Math.max(...selFn.map(f => fxMinRowsFor(f, controlN, true)));
   const chronoNum = used.slice().reverse(); // lama -> baru
 
   let success = 0, fail = 0;
