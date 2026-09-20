@@ -662,7 +662,7 @@ function raporText(){
 
 async function sendToGenerator(withFilter){
   const pr = A.lastPred; if(!pr) return say('Belum ada prediksi. Ketik “prediksi”.');
-  if(typeof fxGen1Locked !== 'undefined' && fxGen1Locked) return say('Gen 1 sedang terkunci (Mode Auto/Semi Auto atau LOCK GEN 1). Buka kuncinya dulu supaya angka Ai tidak bentrok.');
+  await ensureGen1Ready();
   const pools = pr.map(x => x.digits.map(String));
   try{ lastTop8Pools = pools; }catch(e){}
   const bo = document.getElementById('bulkOut'); if(!bo) return say('Kolom Generator (#bulkOut) tidak ditemukan.');
@@ -672,25 +672,50 @@ async function sendToGenerator(withFilter){
     const fc = document.getElementById('filterCard');
     if(fc && fc.style.display === 'block' && typeof resetFilters === 'function') resetFilters();
   }catch(e){ return say('Angka masuk kolom Generator, tapi pembuatan kombinasi gagal: ' + e.message); }
-  say('Angka Ai dikirim ke Generator: ' + bo.value);
+  const lockRes = lockGen1FromAi(pr);
+  const lockNote = lockRes.ok ? '🔒 Gen 1 dikunci pakai angka ini (tidak akan ditimpa Formula X).' : '⚠️ Gen 1 belum bisa dikunci: ' + lockRes.msg;
+  say('Angka Ai dikirim ke Generator: ' + bo.value + '\n' + lockNote);
   if(withFilter) await runFilter();
   if(typeof window.goPage === 'function') window.goPage('generator');
 }
 
 // ---------- Isi Generator sekali jalan: Gen 1 -> Gen 2 -> Filter ----------
 // Dipicu perintah "isi generator". Memakai jalur resmi yang sama dengan tombol manual di UI
-// (fxManualGenerateFromGen1, fxAutoGenToFilterBtn) supaya perilakunya identik dengan dipakai
-// manual — tidak menduplikasi logika Gen1/Gen2, cuma mengurutkan pemanggilannya.
-async function ensureGen1Unlocked(){
-  if(typeof fxGen1Locked === 'undefined' || !fxGen1Locked) return true;
-  if(typeof getAppMode === 'function' && getAppMode() === 'auto'){
-    say('Gen 1 terkunci & Mode Auto sedang aktif — mematikan Mode Auto dulu…');
-    if(typeof stopAutoMode === 'function') stopAutoMode('normal');
-  } else if(typeof unlockGen1Gen2 === 'function'){
-    unlockGen1Gen2();
+// (fxAutoGenerate/fxManualGenerateFromGen1, fxAutoGenToFilterBtn) supaya perilakunya identik
+// dengan dipakai manual — tidak menduplikasi logika Gen1/Gen2, cuma mengurutkan pemanggilannya.
+// Kalau Mode Auto sedang aktif, matikan dulu — bukan buka kunci Gen 1 lalu dibiarkan terbuka
+// (yang lama), karena Gen 1 mau langsung DIKUNCI ULANG pakai pool Ai (lihat lockGen1FromAi).
+// Kalau dibiarkan Mode Auto tetap jalan, siklus fxAutoLockGen1FromPreset berikutnya akan
+// menimpa balik kunci Ai ini.
+async function ensureGen1Ready(){
+  if(typeof getAppMode !== 'function' || getAppMode() !== 'auto') return;
+  say('Mode Auto sedang aktif — mematikan dulu supaya kunci Gen 1 dari Ai tidak ditimpa balik…');
+  if(typeof stopAutoMode === 'function') stopAutoMode('normal');
+  for(let i = 0; i < 25 && getAppMode() === 'auto'; i++) await new Promise(res => setTimeout(res, 80));
+}
+
+// Kunci Gen 1 pakai pool prediksi Ai sendiri — mirror tombol manual "🔒 LOCK GEN 1", tapi
+// poolnya dari A.lastPred (bukan dihitung ulang lewat fxBuildGen1Pools/Formula X). Diperlakukan
+// sebagai kunci MANUAL (fxGen1SemiAutoLocked & fxGen1AutoLocked tetap false) supaya kebal dari
+// render Formula X biasa — cuma lepas kalau user klik 🔓 UNLOCK GEN 1 sendiri, ganti
+// pasaran/periode, atau ganti mode. TIDAK say()/pushLog sendiri, sama pola dengan
+// lockGen2SlotsFromAi, supaya pemanggil bebas menyusun pesannya sendiri.
+function lockGen1FromAi(pr){
+  if(typeof fxGen1Locked === 'undefined') return { ok: false, msg: 'Fitur Lock Gen 1 tidak ditemukan di halaman ini.' };
+  if(!pr || !pr.length) return { ok: false, msg: 'Belum ada prediksi Ai untuk dijadikan Gen 1.' };
+  if(typeof lastPosLabels === 'undefined' || !lastPosLabels || pr.length !== lastPosLabels.length){
+    return { ok: false, msg: 'Jumlah posisi prediksi Ai (' + pr.length + ') tidak cocok dengan Generator (' + (typeof lastPosLabels !== 'undefined' && lastPosLabels ? lastPosLabels.length : '?') + ').' };
   }
-  for(let i = 0; i < 25 && fxGen1Locked; i++) await new Promise(res => setTimeout(res, 80));
-  return !fxGen1Locked;
+  const pools = pr.map(x => x.digits.map(String));
+  fxGen1AutoLocked = false;
+  fxGen1Locked = true;
+  fxGen1LockedPools = pools;
+  fxGen1LockedPosLabels = lastPosLabels.slice();
+  fxGen1LockedFP = (typeof dataFingerprint === 'function' && typeof lastHistoryNumbers !== 'undefined') ? dataFingerprint(lastHistoryNumbers) : '';
+  fxGen1LockedRule = { trendN: '-', controlN: '-', outN: '-', stats: '-' }; // bukan dari Formula X, tidak relevan
+  if(typeof fxClearStreakGen1List === 'function') fxClearStreakGen1List();
+  if(typeof renderGen1LockUI === 'function') renderGen1LockUI();
+  return { ok: true, pools };
 }
 async function fillGeneratorFull(){
   if(typeof lastTop8Pools === 'undefined' || !document.getElementById('bulkOut')){
@@ -699,8 +724,7 @@ async function fillGeneratorFull(){
   if(!A.lastPred){ const r = refreshPredict(); if(!r) return say('Belum ada data pasaran untuk diisi ke Generator.'); }
   const pr = A.lastPred;
 
-  const opened = await ensureGen1Unlocked();
-  if(!opened) return say('⚠️ Gagal membuka kunci Gen 1 otomatis — buka manual dulu (tombol 🔓 UNLOCK GEN 1), lalu ulangi “isi generator”.');
+  await ensureGen1Ready();
 
   // 1) Pool Ai -> Generator ("Kombinasi Acak")
   const pools = pr.map(x => x.digits.map(String));
@@ -710,7 +734,10 @@ async function fillGeneratorFull(){
   try{ if(typeof generateCombineOutput === 'function') generateCombineOutput(); }
   catch(e){ return say('Angka masuk kolom Generator, tapi pembuatan kombinasi gagal: ' + e.message); }
 
-  // 2) Gen 1 + Gen 2 (kartu Auto Generator Formula X), kalau Formula X sudah dihitung di halaman ini
+  // 2) Kunci Gen 1 pakai pool Ai (supaya kebal ditimpa Formula X), lalu Gen 2 (kartu Auto
+  // Generator Formula X), kalau Formula X sudah dihitung di halaman ini.
+  const gen1LockRes = lockGen1FromAi(pr);
+  const gen1LockNote = gen1LockRes.ok ? '🔒 Gen 1 dikunci pakai angka Ai.' : '⚠️ Gen 1 belum bisa dikunci: ' + gen1LockRes.msg + ' (angka tetap dikirim, tapi bisa ditimpa Formula X kalau data berganti)';
   let gen12Note = 'Formula X belum dihitung di halaman ini — kartu Gen 1/Gen 2 dilewati, cuma pool & filter yang diisi.';
   let elimCount = 0, finalCount = pools.reduce((a, p) => a * (p.length || 1), 1);
   if(typeof lastPosLabels !== 'undefined' && lastPosLabels && typeof lastHistoryNumbers !== 'undefined' && lastHistoryNumbers.length){
@@ -720,19 +747,24 @@ async function fillGeneratorFull(){
       const gen2Res = lockGen2SlotsFromAi(['A', 'B', 'C']);
       const gen2Note = gen2Res.ok ? gen2Res.lines.join(' · ') : '⚠️ Gen 2: ' + gen2Res.msg;
 
-      if(typeof fxClearStreakGen1List === 'function') fxClearStreakGen1List();
-      if(typeof fxManualGenerateFromGen1 === 'function') fxManualGenerateFromGen1();
+      // Gen 1 sudah terkunci (gen1LockRes.ok) -> pakai fxAutoGenerate (baca fxGen1LockedPools,
+      // sama pool yang barusan dikunci). Kalau lock gagal, fallback ke jalur lama
+      // (fxManualGenerateFromGen1, baca lastTop8Pools) supaya fitur tetap jalan.
+      if(gen1LockRes.ok && typeof fxAutoGenerate === 'function') fxAutoGenerate();
+      else if(typeof fxManualGenerateFromGen1 === 'function') fxManualGenerateFromGen1();
       const out = document.getElementById('fxAutoGenOut');
       if(out && out.value){
         const fb = document.getElementById('fxAutoGenToFilterBtn'); if(fb) fb.click();
         const cntEl = document.getElementById('fxAutoGenCount'), elimEl = document.getElementById('fxAutoEliminasiCount');
         finalCount = cntEl ? parseInt(cntEl.textContent, 10) || finalCount : finalCount;
         elimCount = elimEl ? parseInt(elimEl.textContent, 10) || 0 : 0;
-        gen12Note = 'Gen 1 diisi ' + pools.length + ' posisi dari angka Ai → ' + finalCount + ' kombinasi' + (elimCount ? ' (' + elimCount + ' dieliminasi Gen 2).' : ' (Gen 2 tidak mengeliminasi apa pun).') + '\nGen 2: ' + gen2Note;
+        gen12Note = gen1LockNote + '\nGen 1 diisi ' + pools.length + ' posisi dari angka Ai → ' + finalCount + ' kombinasi' + (elimCount ? ' (' + elimCount + ' dieliminasi Gen 2).' : ' (Gen 2 tidak mengeliminasi apa pun).') + '\nGen 2: ' + gen2Note;
       } else {
-        gen12Note = 'Gen 1 diisi dari angka Ai, tapi proses Generate belum menghasilkan apa-apa (cek posisi Formula X).\nGen 2: ' + gen2Note;
+        gen12Note = gen1LockNote + '\nGen 1 diisi dari angka Ai, tapi proses Generate belum menghasilkan apa-apa (cek posisi Formula X).\nGen 2: ' + gen2Note;
       }
     }catch(e){ gen12Note = '⚠️ Gen 1/Gen 2 gagal diisi: ' + (e && e.message ? e.message : e); }
+  } else {
+    gen12Note = gen1LockNote + '\n' + gen12Note;
   }
   say('🧩 Isi Generator: pool Ai dikirim (' + bo.value + ').\n' + gen12Note);
 
@@ -1038,10 +1070,7 @@ function buildCard(){
       '<button class="btn" data-cmd="uji semua">🧪 Uji Semua</button>' +
       '<button class="btn" data-cmd="eksperimen">🔬 Eksperimen</button>' +
       '<button class="btn" data-cmd="kenapa">💬 Kenapa?</button>' +
-      '<button class="btn" data-cmd="kirim">📤 Ke Generator</button>' +
       '<button class="btn" data-cmd="isi generator">🧩 Isi Generator</button>' +
-      '<button class="btn" data-cmd="isi gen2 semua">🧩 Isi Gen 2 (Ai)</button>' +
-      '<button class="btn" data-cmd="filter">🎛️ Isi Angka Filter</button>' +
       '<button class="btn" data-cmd="uji filter">🧪 Uji Filter</button>' +
       '<button class="btn" id="aimImportBtn">📥 Impor JSON</button>' +
       '<input type="file" id="aimImportFile" accept=".json,application/json" style="display:none;">' +
