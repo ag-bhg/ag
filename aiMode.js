@@ -330,6 +330,8 @@ const CANON_CMDS = [
   { cmd: 'uji', label: 'uji — cek akurasi pasaran aktif', kw: ['uji', 'tes', 'test', 'cek', 'akurasi'] },
   { cmd: 'eksperimen', label: 'eksperimen — coba gabungan pakar baru', kw: ['eksperimen', 'coba', 'gabung', 'lab'] },
   { cmd: 'kirim', label: 'kirim — kirim angka ke Generator', kw: ['kirim', 'generator', 'pindah', 'transfer'] },
+  { cmd: 'isi generator', label: 'isi generator — sekali jalan isi Gen 1, Gen 2, & Filter', kw: ['isi', 'generator', 'penuh', 'gen1', 'gen2', 'lengkap'] },
+  { cmd: 'isi gen2', label: 'isi gen2 [A/B/C/semua] — kunci Gen 2 pakai digit terlemah Ai', kw: ['isi', 'gen2', 'gen 2', 'lemah', 'eliminasi'] },
   { cmd: 'filter', label: 'filter — hasilkan & isi semua angka filter Generator', kw: ['filter', 'saring', 'pangkas'] },
   { cmd: 'uji filter', label: 'uji filter — cek akurasi angka filter', kw: ['uji filter', 'tes filter', 'akurasi filter'] },
   { cmd: 'rapor', label: 'rapor — ringkasan hasil belajar', kw: ['rapor', 'ringkasan', 'laporan', 'progres'] }
@@ -580,6 +582,8 @@ async function handle(rawText){
     A.nIkut = n; save(); refreshPredict(true); return say('Siap. Filter Angka Ikut sekarang ' + n + ' digit. Ketik “filter” untuk mengisinya ke Generator.');
   }
   if(/^(?:angka\s+)?filter/.test(t)) return runFilter();
+  if(/^(isi\s*generator|generator\s*penuh|isi\s*semua)/.test(t)) return fillGeneratorFull();
+  if((m = t.match(/^isi\s*gen\s*2\s*(a|b|c|semua|all)?$/))) return fillGen2FromAi(m[1]);
   if(/^kirim\s*semua/.test(t)) return sendToGenerator(true);
   if(/^kirim/.test(t)) return sendToGenerator();
   if(/^rapor/.test(t)) return say(raporText());
@@ -629,7 +633,7 @@ async function handle(rawText){
 }
 
 function helpText(){
-  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• tampilkan test [pasaran] (dari ingatan, tanpa hitung ulang)\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• kunci HK,SDY,SGP (referensi silang-pasaran) · kunci mati\n• sumber (cek data mana yang dipakai Ai)\n• filter (belajar + uji + isi semua angka filter) · uji filter (hanya uji) · filter ikut 5\n• kirim (ke Generator) · kirim semua (pool + filter) · rapor\n\nKalau kalimat Anda tidak mirip perintah manapun, saya coba tebak & tanya konfirmasi dulu (sekali dikonfirmasi, saya ingat terus). Kalau memang bukan perintah, saya jawab santai lewat obrolan bebas.';
+  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• tampilkan test [pasaran] (dari ingatan, tanpa hitung ulang)\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• kunci HK,SDY,SGP (referensi silang-pasaran) · kunci mati\n• sumber (cek data mana yang dipakai Ai)\n• filter (belajar + uji + isi semua angka filter) · uji filter (hanya uji) · filter ikut 5\n• kirim (ke Generator) · kirim semua (pool + filter) · isi generator (sekali jalan: Gen 1 → Gen 2 → Filter) · isi gen2 A/B/C/semua (kunci Gen 2 pakai digit terlemah Ai) · rapor\n\nKalau kalimat Anda tidak mirip perintah manapun, saya coba tebak & tanya konfirmasi dulu (sekali dikonfirmasi, saya ingat terus). Kalau memang bukan perintah, saya jawab santai lewat obrolan bebas.';
 }
 function predText(r){
   return 'Pasaran ' + r.name + ' (' + r.n + ' data' + (r.newRows ? ', +' + r.newRows + ' baru dipelajari' : '') + '):\n' + r.pr.map(x => x.label + ' [' + x.digits.join(' ') + '] · peluang gabungan ' + (x.mass * 100).toFixed(1) + '% vs acak ' + (x.chance * 100).toFixed(0) + '%' + (x.wNull > 0.5 ? ' ≈ acak' : '')).join('\n') + '\n' + (r.pr.every(x => x.wNull > 0.5) ? 'Ai sendiri menilai belum ada pola yang terbukti di pasaran ini — angka di atas hampir setara pilihan acak.' : 'Selisih kecil dari acak itu normal; cek “uji” untuk bukti ke belakang.');
@@ -671,6 +675,129 @@ async function sendToGenerator(withFilter){
   say('Angka Ai dikirim ke Generator: ' + bo.value);
   if(withFilter) await runFilter();
   if(typeof window.goPage === 'function') window.goPage('generator');
+}
+
+// ---------- Isi Generator sekali jalan: Gen 1 -> Gen 2 -> Filter ----------
+// Dipicu perintah "isi generator". Memakai jalur resmi yang sama dengan tombol manual di UI
+// (fxManualGenerateFromGen1, fxAutoGenToFilterBtn) supaya perilakunya identik dengan dipakai
+// manual — tidak menduplikasi logika Gen1/Gen2, cuma mengurutkan pemanggilannya.
+async function ensureGen1Unlocked(){
+  if(typeof fxGen1Locked === 'undefined' || !fxGen1Locked) return true;
+  if(typeof getAppMode === 'function' && getAppMode() === 'auto'){
+    say('Gen 1 terkunci & Mode Auto sedang aktif — mematikan Mode Auto dulu…');
+    if(typeof stopAutoMode === 'function') stopAutoMode('normal');
+  } else if(typeof unlockGen1Gen2 === 'function'){
+    unlockGen1Gen2();
+  }
+  for(let i = 0; i < 25 && fxGen1Locked; i++) await new Promise(res => setTimeout(res, 80));
+  return !fxGen1Locked;
+}
+async function fillGeneratorFull(){
+  if(typeof lastTop8Pools === 'undefined' || !document.getElementById('bulkOut')){
+    return say('Fitur Generator tidak ditemukan di halaman ini.');
+  }
+  if(!A.lastPred){ const r = refreshPredict(); if(!r) return say('Belum ada data pasaran untuk diisi ke Generator.'); }
+  const pr = A.lastPred;
+
+  const opened = await ensureGen1Unlocked();
+  if(!opened) return say('⚠️ Gagal membuka kunci Gen 1 otomatis — buka manual dulu (tombol 🔓 UNLOCK GEN 1), lalu ulangi “isi generator”.');
+
+  // 1) Pool Ai -> Generator ("Kombinasi Acak")
+  const pools = pr.map(x => x.digits.map(String));
+  try{ lastTop8Pools = pools; }catch(e){}
+  const bo = document.getElementById('bulkOut'); if(!bo) return say('Kolom Generator (#bulkOut) tidak ditemukan.');
+  bo.value = pools.map(p => p.join('')).join('.');
+  try{ if(typeof generateCombineOutput === 'function') generateCombineOutput(); }
+  catch(e){ return say('Angka masuk kolom Generator, tapi pembuatan kombinasi gagal: ' + e.message); }
+
+  // 2) Gen 1 + Gen 2 (kartu Auto Generator Formula X), kalau Formula X sudah dihitung di halaman ini
+  let gen12Note = 'Formula X belum dihitung di halaman ini — kartu Gen 1/Gen 2 dilewati, cuma pool & filter yang diisi.';
+  let elimCount = 0, finalCount = pools.reduce((a, p) => a * (p.length || 1), 1);
+  if(typeof lastPosLabels !== 'undefined' && lastPosLabels && typeof lastHistoryNumbers !== 'undefined' && lastHistoryNumbers.length){
+    try{
+      // Isi Gen 2 (2A/2B/2C) dulu pakai digit terlemah Ai, sebelum pipeline eliminasi dijalankan —
+      // sama seperti "isi gen2 semua", tapi jadi satu paket dengan "isi generator".
+      const gen2Res = lockGen2SlotsFromAi(['A', 'B', 'C']);
+      const gen2Note = gen2Res.ok ? gen2Res.lines.join(' · ') : '⚠️ Gen 2: ' + gen2Res.msg;
+
+      if(typeof fxClearStreakGen1List === 'function') fxClearStreakGen1List();
+      if(typeof fxManualGenerateFromGen1 === 'function') fxManualGenerateFromGen1();
+      const out = document.getElementById('fxAutoGenOut');
+      if(out && out.value){
+        const fb = document.getElementById('fxAutoGenToFilterBtn'); if(fb) fb.click();
+        const cntEl = document.getElementById('fxAutoGenCount'), elimEl = document.getElementById('fxAutoEliminasiCount');
+        finalCount = cntEl ? parseInt(cntEl.textContent, 10) || finalCount : finalCount;
+        elimCount = elimEl ? parseInt(elimEl.textContent, 10) || 0 : 0;
+        gen12Note = 'Gen 1 diisi ' + pools.length + ' posisi dari angka Ai → ' + finalCount + ' kombinasi' + (elimCount ? ' (' + elimCount + ' dieliminasi Gen 2).' : ' (Gen 2 tidak mengeliminasi apa pun).') + '\nGen 2: ' + gen2Note;
+      } else {
+        gen12Note = 'Gen 1 diisi dari angka Ai, tapi proses Generate belum menghasilkan apa-apa (cek posisi Formula X).\nGen 2: ' + gen2Note;
+      }
+    }catch(e){ gen12Note = '⚠️ Gen 1/Gen 2 gagal diisi: ' + (e && e.message ? e.message : e); }
+  }
+  say('🧩 Isi Generator: pool Ai dikirim (' + bo.value + ').\n' + gen12Note);
+
+  // 3) Filter Pangkas Kombinasi (isi + terapkan, pakai fungsi Ai yang sudah ada)
+  await runFilter();
+
+  pushLog('generator', A.cur || '-', gen12Note, [
+    { k: 'Pool Gen 1', v: bo.value },
+    { k: 'Kombinasi akhir', v: String(finalCount) + (elimCount ? ' (−' + elimCount + ' Gen 2)' : '') }
+  ]);
+  if(typeof window.goPage === 'function') window.goPage('generator');
+}
+
+// ---------- Isi Gen 2 (2A/2B/2C) pakai digit PALING LEMAH menurut Ai ----------
+// Beda arah dari prediksi biasa: predict() sudah menghitung peluang SEMUA 10 digit per posisi
+// (bukan cuma top-N yang ditampilkan) lewat field x.P — di sini diambil yang paling KECIL
+// peluangnya, karena Gen 2 memang dipakai untuk ELIMINASI (bukan pilihan utama).
+// Jumlah digit/posisi mengikuti pola bawaan app (WORST_RANK_BY_SLOT: 2A=1, 2B=2, 2C=3) supaya
+// konsisten dengan makna "peringkat terburuk ke-N" yang sudah ada di Formula X.
+function weakDigitsPools(n){
+  const pr = A.lastPred; if(!pr) return null;
+  return pr.map(x => {
+    const order = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].slice().sort((a, b) => x.P[a] - x.P[b]); // lemah -> kuat
+    return order.slice(0, n).sort((a, b) => a - b).map(String);
+  });
+}
+// Inti pengisian Gen 2 (dipakai bareng oleh "isi generator" & "isi gen2") — TIDAK say()/pushLog
+// sendiri, cuma mengunci state + render kartu, supaya pemanggil bebas menyusun pesannya sendiri.
+function lockGen2SlotsFromAi(slots){
+  if(typeof fxGen2State === 'undefined') return { ok: false, msg: 'Fitur Gen 2 tidak ditemukan di halaman ini.' };
+  if(!A.lastPred) return { ok: false, msg: 'Belum ada prediksi Ai untuk dijadikan Gen 2.' };
+  if(typeof lastPosLabels === 'undefined' || !lastPosLabels || A.lastPred.length !== lastPosLabels.length){
+    return { ok: false, msg: 'Jumlah posisi prediksi Ai (' + A.lastPred.length + ') tidak cocok dengan Generator (' + (typeof lastPosLabels !== 'undefined' && lastPosLabels ? lastPosLabels.length : '?') + ').' };
+  }
+  const NBY = { A: 1, B: 2, C: 3 };
+  const lines = [];
+  slots.forEach(sl => {
+    const n = NBY[sl];
+    const pools = weakDigitsPools(n);
+    const s = fxGen2State[sl];
+    s.locked = true; s.pools = pools; s.posLabels = lastPosLabels.slice();
+    s.fp = (typeof dataFingerprint === 'function' && typeof lastHistoryNumbers !== 'undefined') ? dataFingerprint(lastHistoryNumbers) : '';
+    s.rule = null; s.picks = null; s.formulaInfo = null; s.method = 'ai-weak';
+    if(typeof renderGen2LockUI === 'function') renderGen2LockUI(sl);
+    const info = document.getElementById('fxGen2' + sl + 'RuleInfo');
+    if(info) info.textContent = 'Sumber: Ai (' + n + ' digit terlemah/posisi)';
+    lines.push('2' + sl + ': ' + n + ' digit terlemah/posisi → ' + pools.map(p => p.join('')).join('.'));
+  });
+  return { ok: true, lines };
+}
+async function fillGen2FromAi(arg){
+  if(!A.lastPred){ const r = refreshPredict(); if(!r) return say('Belum ada data pasaran untuk dijadikan Gen 2.'); }
+  const a = (arg || '').trim().toUpperCase();
+  let slots;
+  if(!a || a === 'A') slots = ['A'];
+  else if(a === 'B') slots = ['B'];
+  else if(a === 'C') slots = ['C'];
+  else if(a === 'SEMUA' || a === 'ALL') slots = ['A', 'B', 'C'];
+  else return say('Slot Gen 2 tidak dikenal. Pakai: isi gen2 A / B / C / semua.');
+
+  const res = lockGen2SlotsFromAi(slots);
+  if(!res.ok) return say(res.msg);
+  say('🧩 Gen 2 diisi dari Ai (digit paling lemah/jarang keluar per posisi):\n' + res.lines.join('\n'));
+  pushLog('generator', A.cur || '-', 'Gen 2 diisi Ai: ' + slots.map(sl => '2' + sl).join(', '),
+    slots.map(sl => ({ k: '2' + sl, v: fxGen2State[sl].pools.map(p => p.join('')).join('.') })));
 }
 
 // ---------- Angka filter (Filter Pangkas Kombinasi di Generator) ----------
@@ -825,7 +952,7 @@ function renderChat(){
 // Pasaran/Ringkasan) supaya tabelnya tetap rapi; field yang berbeda tiap sumber (per-posisi, per-pakar,
 // dll) disimpan di entry.detail dan baru dirender saat baris di-expand ("▾ detail").
 const MAX_LOG = 20;
-const LOG_TYPE_LABEL = { prediksi: '🎯 Prediksi', uji: '🧪 Uji', uji_semua: '🧪 Uji Semua', eksperimen: '🔬 Eksperimen' };
+const LOG_TYPE_LABEL = { prediksi: '🎯 Prediksi', uji: '🧪 Uji', uji_semua: '🧪 Uji Semua', eksperimen: '🔬 Eksperimen', generator: '🧩 Generator' };
 function pushLog(type, market, summary, detail){
   A.resultLog.unshift({ ts: Date.now(), type, market: market || '-', summary, detail: detail || [] });
   if(A.resultLog.length > MAX_LOG) A.resultLog.length = MAX_LOG;
@@ -912,6 +1039,8 @@ function buildCard(){
       '<button class="btn" data-cmd="eksperimen">🔬 Eksperimen</button>' +
       '<button class="btn" data-cmd="kenapa">💬 Kenapa?</button>' +
       '<button class="btn" data-cmd="kirim">📤 Ke Generator</button>' +
+      '<button class="btn" data-cmd="isi generator">🧩 Isi Generator</button>' +
+      '<button class="btn" data-cmd="isi gen2 semua">🧩 Isi Gen 2 (Ai)</button>' +
       '<button class="btn" data-cmd="filter">🎛️ Isi Angka Filter</button>' +
       '<button class="btn" data-cmd="uji filter">🧪 Uji Filter</button>' +
       '<button class="btn" id="aimImportBtn">📥 Impor JSON</button>' +
