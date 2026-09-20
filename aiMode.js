@@ -14,10 +14,13 @@ const A = {
   states: {},            // name -> state otak
   tilt: null,            // bobot awal hasil belajar antar pasaran
   cur: null, out: 8, outPos: {}, pin: {}, ban: {}, famOff: {},
-  lastPred: null, busy: false, chat: [], sig: '', globalNote: '',
+  lastPred: null, busy: false, chat: [], resultLog: [], sig: '', globalNote: '',
   alias: {}, src: {}, lastActive: '', activeMiss: '',
   patterns: {},          // kalimat yang sudah "diajarkan" user -> perintah asli yang dimaksud
-  pendingTeach: null      // { phrase, cmd } — menunggu konfirmasi ya/tidak dari user
+  pendingTeach: null,    // { phrase, cmd } — menunggu konfirmasi ya/tidak dari user
+  xrefNames: [],         // nama pasaran "kunci" yg diuji sbg referensi silang-pasaran (kosong = mati)
+  nIkut: 4,              // banyak digit filter "Angka Ikut" (filter ini tidak punya dropdown di tab Analisis)
+  lastFilter: null       // angka filter hasil Ai untuk prediksi terakhir (lihat B.filterNumbers)
 };
 
 // ---------- Penyimpanan lokal (instan, cadangan offline) ----------
@@ -25,7 +28,7 @@ function loadLocal(){
   try{
     const o = JSON.parse(localStorage.getItem(LS_STATES) || 'null');
     if(o){
-      A.out = o.out || 8; A.tilt = o.tilt || null; A.globalNote = o.globalNote || '';
+      A.out = o.out || 8; A.tilt = o.tilt || null; A.globalNote = o.globalNote || ''; A.xrefNames = o.xrefNames || []; A.nIkut = o.nIkut || 4;
       Object.keys(o.states || {}).forEach(k => { const st = B.deserialize(o.states[k]); if(st) A.states[k] = st; });
     }
     A.imported = JSON.parse(localStorage.getItem(LS_DATA) || '{}') || {};
@@ -35,7 +38,7 @@ function saveLocal(){
   try{
     const states = {};
     Object.keys(A.states).forEach(k => { states[k] = B.serialize(A.states[k]); });
-    localStorage.setItem(LS_STATES, JSON.stringify({ out: A.out, tilt: A.tilt, globalNote: A.globalNote, states }));
+    localStorage.setItem(LS_STATES, JSON.stringify({ out: A.out, tilt: A.tilt, globalNote: A.globalNote, xrefNames: A.xrefNames, nIkut: A.nIkut, states }));
   }catch(e){ say('⚠️ Memori browser penuh, hasil belajar tidak tersimpan (tetap jalan selama halaman terbuka).'); }
 }
 function saveData(){ try{ localStorage.setItem(LS_DATA, JSON.stringify(A.imported)); }catch(e){} }
@@ -52,6 +55,8 @@ async function load(){
     if('out' in p) A.out = p.out;
     if('tilt' in p) A.tilt = p.tilt;
     if('globalNote' in p) A.globalNote = p.globalNote;
+    if('xrefNames' in p) A.xrefNames = p.xrefNames || [];
+    if('nIkut' in p) A.nIkut = p.nIkut || 4;
     if('pin' in p) A.pin = p.pin || {};
     if('ban' in p) A.ban = p.ban || {};
     if('famOff' in p) A.famOff = p.famOff || {};
@@ -69,7 +74,7 @@ async function load(){
 function save(){
   saveLocal();
   if(typeof AiMemory !== 'undefined'){
-    AiMemory.savePrefs({ out: A.out, tilt: A.tilt, globalNote: A.globalNote, pin: A.pin, ban: A.ban, famOff: A.famOff, outPos: A.outPos });
+    AiMemory.savePrefs({ out: A.out, tilt: A.tilt, globalNote: A.globalNote, pin: A.pin, ban: A.ban, famOff: A.famOff, outPos: A.outPos, xrefNames: A.xrefNames, nIkut: A.nIkut });
   }
 }
 // Kirim HASIL BELAJAR 1 pasaran ke cloud — dipanggil hanya di titik-titik yang benar mengubah otak
@@ -115,8 +120,8 @@ function activeLabels(){
   }
   return c.filter(Boolean);
 }
-// Cari pasaran aktif di daftar pasaran Ai. Kembalikan { name } kalau ketemu, { miss: label } kalau ada pasaran aktif
-// tapi tidak ada/kurang data di Ai, atau {} kalau tidak ada pasaran aktif sama sekali.
+// Cari pasaran aktif di daftar pasaran Ai. Kembalikan { name } kalau ketemu, { miss: label } kalau ada
+// pasaran aktif tapi tidak ada/kurang data di Ai, atau {} kalau tidak ada pasaran aktif sama sekali.
 function resolveActive(ms){
   const names = Object.keys(ms), up = x => String(x == null ? '' : x).trim().toUpperCase();
   const find = q => { q = up(q); return q ? names.find(n => up(n) === q) : undefined; };
@@ -135,10 +140,57 @@ function collectTexts(){
   const di = document.getElementById('dataInput');
   if(di && di.value && di.value.trim()){
     const code = activeCode() || 'AKTIF';
-    if(!texts[code]){ texts[code] = di.value; src[code] = 'kotak Data Historis'; } // hanya kalau belum ada sumber lain
+    if(!texts[code]){ texts[code] = di.value; src[code] = 'kotak Data Historis'; }
   }
   A.src = src;
   return texts;
+}
+
+// ---------- Selaras tanggal lintas-pasaran (khusus pakar XMKT) ----------
+// Parser tanggal DD-MM-YYYY sejajar dengan B.parseMarketText, untuk buildRefSeriesFor.
+function parseMarketTextDated(text){
+  const lines = String(text || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
+  const rows = []; let skipped = 0;
+  lines.forEach(line => {
+    const cols = line.split('\t');
+    const n = cols[cols.length - 1].trim();
+    if(/^\d{2,8}$/.test(n)){
+      const tgl = cols.length >= 3 ? cols[0].trim() : '';
+      rows.push({ tanggal: /^\d{2}-\d{2}-\d{4}$/.test(tgl) ? tgl : null, nomor: n });
+    } else skipped++;
+  });
+  const cnt = {}; rows.forEach(r => { cnt[r.nomor.length] = (cnt[r.nomor.length] || 0) + 1; });
+  let L = 0, best = 0;
+  Object.keys(cnt).forEach(k => { if(cnt[k] > best){ best = cnt[k]; L = +k; } });
+  const kept = rows.filter(r => r.nomor.length === L).reverse(); // lama -> baru
+  return { L, C: kept.map(r => r.nomor.split('').map(Number)), dates: kept.map(r => r.tanggal), skipped: skipped + (rows.length - kept.length) };
+}
+// Tanggal hari ini "DD-MM-YYYY" zona WIB
+function todayStrWIB(){
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: 'numeric' }).formatToParts(new Date());
+  const get = k => (parts.find(p => p.type === k) || {}).value || '';
+  return get('day') + '-' + get('month') + '-' + get('year');
+}
+// Bangun {extRefs, refSeries} untuk pasaran curName dari pasaran "kunci" (A.xrefNames).
+// FAIL-SAFE: kalau A.xrefNames kosong atau tanggal tidak lengkap, kembalikan extRefs:[], refSeries:{}.
+function buildRefSeriesFor(curName, texts){
+  const names = (A.xrefNames || []).filter(n => n && n !== curName && texts[n]);
+  if(!names.length) return { extRefs: [], refSeries: {} };
+  const tgt = parseMarketTextDated(texts[curName]);
+  if(!tgt.C.length || tgt.dates.some(d => !d)) return { extRefs: [], refSeries: {} };
+  const allDates = tgt.dates.concat([todayStrWIB()]);
+  const extRefs = [], refSeries = {};
+  names.forEach(refName => {
+    const ref = parseMarketTextDated(texts[refName]);
+    if(!ref.L || !ref.C.length) return;
+    const byDate = {};
+    for(let i = 0; i < ref.C.length; i++){ if(ref.dates[i]) byDate[ref.dates[i]] = ref.C[i]; }
+    const perPos = [];
+    for(let r = 0; r < ref.L; r++) perPos.push(allDates.map(d => (d && byDate[d]) ? byDate[d][r] : -1));
+    extRefs.push({ name: refName, L: ref.L });
+    refSeries[refName] = perPos;
+  });
+  return { extRefs, refSeries };
 }
 function markets(){
   const texts = collectTexts(), res = {};
@@ -148,11 +200,13 @@ function markets(){
     const pm = A.cache[name].parsed;
     if(pm.L >= 2 && pm.C.length >= 12) res[name] = pm;
   });
+  // pakar HYPE membaca hasil SEMUA pasaran pada tanggal-tanggal terakhir; daftarkan lagi hanya kalau datanya berubah
+  const sig = Object.keys(res).sort().map(n => n + ':' + res[n].C.length + ':' + ((res[n].dates || [])[res[n].C.length - 1] || '')).join('|');
+  if(sig !== A._hypeSig && typeof B.setHypeMarkets === 'function'){ B.setHypeMarkets(res); A._hypeSig = sig; }
   return res;
 }
-// Pasaran yang dipakai Ai MENGIKUTI pasaran aktif di dropdown Periode: begitu pasaran aktif berganti, A.cur ikut
-// berpindah. Pilihan manual di dropdown/perintah "pasaran X" tetap dihormati sampai pasaran aktif berganti lagi.
-// (Dulu A.cur yang lama selalu menang, jadi Ai nyangkut di pasaran pertama walau Periode sudah diganti.)
+// Pasaran yang dipakai Ai MENGIKUTI pasaran aktif di dropdown Periode: begitu pasaran aktif berganti,
+// A.cur ikut berpindah. Pilihan manual tetap dihormati sampai pasaran aktif berganti lagi.
 function pickDefaultCur(ms){
   const act = resolveActive(ms);
   A.activeMiss = act.miss || '';
@@ -170,7 +224,8 @@ function pickDefaultCur(ms){
 function learnOne(name, ms){
   const pm = ms[name]; if(!pm) return null;
   const before = A.states[name] ? A.states[name].t : 0;
-  const st = B.learnMarket(name, pm.C, pm.L, { state: A.states[name], tilt: A.tilt });
+  const { extRefs, refSeries } = buildRefSeriesFor(name, collectTexts());
+  const st = B.learnMarket(name, pm.C, pm.L, { state: A.states[name], tilt: A.tilt, dates: pm.dates, extRefs, refSeries });
   A.states[name] = st;
   return { st, newRows: Math.max(0, st.t - Math.max(before, B.T0)) };
 }
@@ -190,12 +245,14 @@ async function learnAll(){
   say('Mulai belajar ' + names.length + ' pasaran: dari 10 data terlama, maju satu-satu sampai data terakhir…');
   const run = async (tilt) => {
     const states = [];
+    const texts = collectTexts();
     for(let i = 0; i < names.length; i++){
       const pm = ms[names[i]];
       if(pm.C.length < 20) continue;
-      const st = B.learnMarket(names[i], pm.C, pm.L, { tilt, state: tilt === A.tilt ? A.states[names[i]] : null });
+      const { extRefs, refSeries } = buildRefSeriesFor(names[i], texts);
+      const st = B.learnMarket(names[i], pm.C, pm.L, { tilt, state: tilt === A.tilt ? A.states[names[i]] : null, dates: pm.dates, extRefs, refSeries });
       A.states[names[i]] = st; states.push(st);
-      setStatus('Belajar ' + (i + 1) + '/' + names.length + ' · ' + names[i]); await tick();
+      if(i % 4 === 0){ setStatus('Belajar ' + (i + 1) + '/' + names.length + ' · ' + names[i]); await tick(); }
     }
     return states;
   };
@@ -238,8 +295,14 @@ function predictCur(){
   const r = learnOne(name, ms);
   if(!r) return null;
   const outArg = r.st.L === 0 ? A.out : Array.from({ length: r.st.L }, (_, p) => A.outPos[p] || A.out);
-  const pr = B.predict(r.st, ms[name].C, { out: outArg, pin: A.pin, ban: A.ban, famOff: hasOff() ? A.famOff : null });
+  const pr = B.predict(r.st, ms[name].C, { out: outArg, pin: A.pin, ban: A.ban, famOff: hasOff() ? A.famOff : null, dates: ms[name].dates });
+  // dates diteruskan supaya HYPE pakai tanggal yang benar untuk periode berikutnya
   A.lastPred = pr; A.lastNew = r.newRows;
+  try{
+    const fc = filterCounts(), sg = filterSig(name, ms[name], fc, outArg);
+    // hasil filter yang sudah dipelajari + diuji (perintah "filter") dipertahankan selama data/pengaturannya sama; kalau tidak, tampilkan versi model saja
+    if(!(A.lastFilter && A.lastFilter.src === 'belajar' && A.lastFilter.sig === sg)){ A.lastFilter = B.filterNumbers(pr, fc); A.lastFilter.src = 'model'; }
+  }catch(e){ A.lastFilter = null; console.error('Mode Ai: gagal menghitung angka filter', e); }
   return { name, st: r.st, pr, newRows: r.newRows, n: ms[name].C.length };
 }
 function hasOff(){ return Object.keys(A.famOff).some(k => A.famOff[k]); }
@@ -267,6 +330,8 @@ const CANON_CMDS = [
   { cmd: 'uji', label: 'uji — cek akurasi pasaran aktif', kw: ['uji', 'tes', 'test', 'cek', 'akurasi'] },
   { cmd: 'eksperimen', label: 'eksperimen — coba gabungan pakar baru', kw: ['eksperimen', 'coba', 'gabung', 'lab'] },
   { cmd: 'kirim', label: 'kirim — kirim angka ke Generator', kw: ['kirim', 'generator', 'pindah', 'transfer'] },
+  { cmd: 'filter', label: 'filter — hasilkan & isi semua angka filter Generator', kw: ['filter', 'saring', 'pangkas'] },
+  { cmd: 'uji filter', label: 'uji filter — cek akurasi angka filter', kw: ['uji filter', 'tes filter', 'akurasi filter'] },
   { cmd: 'rapor', label: 'rapor — ringkasan hasil belajar', kw: ['rapor', 'ringkasan', 'laporan', 'progres'] }
 ];
 function suggestCommand(t){
@@ -276,7 +341,7 @@ function suggestCommand(t){
     c.kw.forEach(k => { if(t.indexOf(k) >= 0) score += k.length; });
     if(score > bestScore){ bestScore = score; best = c; }
   });
-  return bestScore >= 4 ? best : null; // ambang minimal supaya tidak asal tebak
+  return bestScore >= 6 ? best : null; // dinaikkan dari 4->6: kata umum sehari-hari tidak salah terpicu
 }
 
 // Ringkasan Formula X (posisi terpilih + 3 teratas) untuk konteks obrolan bebas — dibaca dari
@@ -315,6 +380,42 @@ function contextBlock(){
   return parts.join('\n');
 }
 
+// Tindakan NYATA yang boleh dipicu OTOMATIS lewat tag saran dari LLM (lihat askAiChat di bawah) —
+// SENGAJA dibatasi hanya ke 4 aksi yang sudah ada perintah manualnya sendiri dan tidak mengubah
+// data pasaran/Generator. LLM boleh "mengajak" ngecek sesuatu, tapi angka selalu dari aiBrain asli.
+function runTaggedAction(action, ms, cur){
+  if(action === 'prediksi'){
+    const r = refreshPredict();
+    if(!r) return 'Belum ada data pasaran untuk diprediksi.';
+    pushLog('prediksi', r.name, 'OUT ' + A.out + ' · ' + r.pr.length + ' posisi' + (r.newRows ? ' · +' + r.newRows + ' baru' : ''),
+      r.pr.map(x => ({ k: x.label, v: x.digits.join(' ') + ' · ' + (x.mass * 100).toFixed(1) + '% vs ' + (x.chance * 100).toFixed(0) + '%' })));
+    return predText(r);
+  }
+  if(action === 'uji'){
+    const st = cur && A.states[cur];
+    if(!st) return 'Pasaran ini belum dipelajari — ketik "belajar" dulu baru bisa diuji.';
+    const rs = B.evalState(st, A.out);
+    const lines = rs.map(r => r.label + ': kena ' + r.pct.toFixed(1) + '% (acak ' + r.chance.toFixed(0) + '%) dari ' + r.n + ' uji, z=' + r.z.toFixed(2));
+    const anySig = rs.filter(r => r.z > 1.645).length;
+    const avgPct = rs.length ? rs.reduce((s, r) => s + r.pct, 0) / rs.length : 0;
+    pushLog('uji', cur, 'kena rata² ' + avgPct.toFixed(1) + '% (acak ' + (rs[0] ? rs[0].chance.toFixed(0) : '-') + '%) · ' + anySig + '/' + rs.length + ' lolos',
+      rs.map(r => ({ k: r.label, v: 'kena ' + r.pct.toFixed(1) + '% z=' + r.z.toFixed(2) })));
+    return 'UJI JUJUR ' + cur + ' (OUT ' + A.out + '):\n' + lines.join('\n') + '\n' + (anySig ? '🟡 ' + anySig + ' dari ' + rs.length + ' posisi terlihat di atas acak — tapi dengan banyak posisi, sebagian wajar kebetulan.' : '⚪ Belum ada bukti pola di pasaran ini, masih setara acak.');
+  }
+  if(action === 'eksperimen'){
+    const st = cur && A.states[cur];
+    if(!st) return 'Pasaran ini belum dipelajari — ketik "belajar" dulu baru bisa eksperimen.';
+    const r = B.forceLab(st, ms[cur].C); save(); refreshPredict(true); persistBrain(cur, st);
+    pushLog('eksperimen', cur, 'dicoba ' + r.tried + ' · diterima ' + r.admitted, [
+      { k: 'OUT', v: String(A.out) },
+      { k: 'Diterima', v: r.admitted ? 'kombinasi baru dipakai' : 'tidak ada yang lolos' }
+    ]);
+    return 'Lab eksperimen ' + cur + ': mencoba ' + r.tried + ' gabungan pakar, diterima ' + r.admitted + ' (hanya yang untung nyata di data latih DAN validasi). ' + (r.admitted ? 'Kombinasi baru ikut dipertimbangkan.' : 'Tidak ada yang lolos — wajar kalau datanya memang acak.');
+  }
+  if(action === 'rapor') return raporText();
+  return null;
+}
+
 // Jalur cadangan "ngobrol bebas" — dipanggil HANYA kalau kalimat tidak cocok perintah
 // terstruktur manapun (dan tidak ada tebakan perintah yang layak). Lewat endpoint Worker
 // /api/ai-chat (Cloudflare Workers AI, gratis, tanpa API key di sisi browser).
@@ -322,11 +423,11 @@ async function askAiChat(userText){
   if(typeof fetch !== 'function') return say('Ai (obrolan bebas) tidak tersedia di browser ini.');
   setBusy(true); setStatus('Ai sedang berpikir…');
   try{
+    const ms = markets(), cur = pickDefaultCur(ms);
     const sys = {
       role: 'system',
-      content: 'Anda adalah Ai di sistem Analisa Frekuensi — asisten analisis statistik pribadi milik user. Anda HANYA membahas data di sistem ini: histori pasaran, hasil belajar Ai (aiBrain), dan hasil Formula X. Kalau ditanya topik di luar itu, tolak dengan sopan dan arahkan kembali ke topik analisa. JANGAN mengarang angka atau data yang tidak ada di konteks di bawah — kalau konteksnya kurang, katakan terus terang. Anda BUKAN peramal — untuk angka pasti, arahkan ke perintah "prediksi"/"uji". Jawab singkat, santai, Bahasa Indonesia.\n\nKONTEKS SAAT INI:\n' + contextBlock()
+      content: 'Anda adalah Ai di sistem Analisa Frekuensi — teman ngobrol sekaligus asisten analisis statistik pribadi milik user. Anda BOLEH ngobrol topik apa saja (hobi, curhat, ide, pertanyaan umum, becanda, dll) — jangan kaku, ikuti alur obrolan dan tanggapi dengan tertarik seperti teman diskusi, bukan cuma mesin jawab-perintah. Kalau obrolan menyenggol data pasaran/Formula X/hasil belajar Ai, pakai KONTEKS di bawah biar nyambung dan akurat.\n\nDua rambu yang WAJIB dijaga apa pun topiknya: (1) JANGAN PERNAH mengarang angka/data yang tidak ada di konteks — kalau tidak tahu/kurang data, bilang terus terang; (2) Anda BUKAN peramal — kalau obrolan mengarah ke "angka apa yang bakal keluar", boleh diskusi santai tapi jangan klaim pasti/yakin di luar apa yang benar-benar terbukti dari data.\n\nFITUR AJAK-CEK: kalau dalam obrolan Anda merasa pas untuk BENERAN mengecek sesuatu di sistem — misal user penasaran "emang beneran ada pola?", atau Anda mau menunjukkan bukti — akhiri balasan Anda dengan SATU baris persis format ini di baris PALING BAWAH (akan disembunyikan dari user, sistem yang akan menjalankan & menunjukkan hasil ASLINYA): [[JALANKAN:uji]] atau [[JALANKAN:eksperimen]] atau [[JALANKAN:prediksi]] atau [[JALANKAN:rapor]]. Pakai HANYA kalau relevan — jangan tiap balasan, dan JANGAN PERNAH menuliskan angka hasil cekannya sendiri (biar sistem yang isi angka aslinya). Di luar itu, jawab senatural mungkin, singkat-santai, Bahasa Indonesia.\n\nKONTEKS SAAT INI:\n' + contextBlock()
     };
-    // Riwayat sebelum pesan ini (pesan terakhir A.chat sudah berisi userText sendiri — tidak diulang)
     const hist = A.chat.slice(-9, -1).map(m => ({ role: m.who === 'user' ? 'user' : 'assistant', content: m.text }));
     const messages = [sys].concat(hist, [{ role: 'user', content: userText }]);
     const resp = await fetch('/api/ai-chat', {
@@ -334,7 +435,17 @@ async function askAiChat(userText){
       body: JSON.stringify({ messages })
     });
     const j = await resp.json();
-    say(j && j.ok ? (j.reply || '(jawaban kosong)') : '⚠️ Ai (obrolan bebas) gagal menjawab: ' + (j && j.error ? j.error : 'tidak diketahui'));
+    if(!j || !j.ok){ say('⚠️ Ai (obrolan bebas) gagal menjawab: ' + (j && j.error ? j.error : 'tidak diketahui')); return; }
+    const rawReply = j.reply || '(jawaban kosong)';
+    // Pisahkan tag [[JALANKAN:xxx]] dari teks yang ditampilkan — tag tidak pernah ditampilkan ke user
+    const tagMatch = rawReply.match(/\[\[JALANKAN:(uji|eksperimen|prediksi|rapor)\]\]\s*$/i);
+    const cleanReply = tagMatch ? rawReply.slice(0, tagMatch.index).trim() : rawReply;
+    say(cleanReply);
+    if(tagMatch){
+      const action = tagMatch[1].toLowerCase();
+      const realResult = runTaggedAction(action, ms, cur);
+      if(realResult) say('📊 (dicek langsung, ini hasil asli dari data — bukan kata Ai obrolan)\n' + realResult);
+    }
   }catch(e){
     say('⚠️ Gagal menghubungi otak Ai: ' + (e && e.message ? e.message : e));
   }finally{
@@ -371,17 +482,6 @@ async function handle(rawText){
   if(A.patterns[t]) return handle(A.patterns[t]);
 
   if(/^(bantuan|help|\?)$/.test(t)) return say(helpText());
-  if(/^sumber/.test(t)){
-    const fb = readFirebaseMap(), fbN = Object.keys(fb).length, imN = Object.keys(A.imported).length;
-    const dup = Object.keys(A.imported).filter(k => k in fb).length;
-    let shape = '(peta Firebase kosong / tidak ditemukan)';
-    try{
-      const ents = (typeof firebaseMarketMap !== 'undefined' && firebaseMarketMap) ? ((firebaseMarketMap instanceof Map) ? Array.from(firebaseMarketMap.entries()) : Object.entries(firebaseMarketMap)) : [];
-      if(ents.length){ const [k, v] = ents[0]; shape = 'contoh entri: kunci “' + k + '” → ' + (typeof v === 'string' ? 'teks' : 'objek {' + Object.keys(v || {}).slice(0, 6).join(', ') + '}') + (v && v.name ? ', name “' + v.name + '”' : ''); }
-    }catch(e){}
-    const act = resolveActive(ms);
-    return say('SUMBER DATA Ai:\n• Pasaran aktif di Periode: ' + (activeLabels().join(' | ') || '(tidak ada)') + '\n• Cocok di Ai: ' + (act.name ? act.name + ' (sumber ' + (A.src[act.name] || '?') + ')' : '⚠️ TIDAK ADA' + (act.miss ? ' (label “' + act.miss + '”)' : '')) + '\n• Ai sedang memakai: ' + (cur || '-') + (cur ? ' (' + (A.src[cur] || '?') + ', ' + ms[cur].C.length + ' data)' : '') + '\n• Pasaran dari Firebase: ' + fbN + ' · dari impor JSON: ' + imN + (dup ? ' (' + dup + ' nama sama dgn Firebase → Firebase yang dipakai)' : '') + '\n• ' + shape);
-  }
   if((m = t.match(/^out\s+(reset|semua)$/))){ A.outPos = {}; A.out = 8; refreshPredict(true); return say('OUT dikembalikan ke 8 untuk semua posisi.'); }
   if((m = t.match(/^out\s+(?:([a-z])\s+)?([1-9])$/))){
     const n = +m[2]; if(n < 4 || n > 9) return say('OUT harus 4–9.');
@@ -394,17 +494,32 @@ async function handle(rawText){
     if(!name) return say('Pasaran “' + q + '” tidak ada di data. Contoh: ' + Object.keys(ms).slice(0, 6).join(', ') + '…');
     A.cur = name; A.pin = {}; A.ban = {}; refreshPredict(true); return say('Pindah ke pasaran ' + name + '.');
   }
-  if(/^(prediksi|angka|hasil|tebak)/.test(t)){ const r = refreshPredict(); if(r) say(predText(r)); return; }
+  if(/^(prediksi|angka(?!\s+filter)|hasil|tebak)/.test(t)){
+    const r = refreshPredict();
+    if(r){
+      say(predText(r));
+      pushLog('prediksi', r.name, 'OUT ' + A.out + ' · ' + r.pr.length + ' posisi' + (r.newRows ? ' · +' + r.newRows + ' baru' : ''),
+        r.pr.map(x => ({ k: x.label, v: x.digits.join(' ') + ' · ' + (x.mass * 100).toFixed(1) + '% vs ' + (x.chance * 100).toFixed(0) + '%' })));
+    }
+    return;
+  }
   if(/^belajar\s*semua/.test(t)) return learnAll();
   if(/^belajar/.test(t)){
     if(!cur) return say('Belum ada data pasaran.');
     const r = learnOne(cur, ms); save(); refreshPredict(true); persistBrain(cur, r.st);
     return say(cur + ': Ai sudah belajar sampai data ke-' + ms[cur].C.length + (r.newRows ? ' (+' + r.newRows + ' data baru)' : ' (tidak ada data baru)') + '.');
   }
+  if(/^uji\s+filter/.test(t)) return runFilterTest();
   if(/^uji\s*semua/.test(t)){
     const sts = Object.keys(A.states).map(k => A.states[k]);
     if(!sts.length) return say('Belum ada yang dipelajari. Ketik “belajar semua” dulu.');
     const ev = B.evalAll(sts, A.out);
+    pushLog('uji_semua', sts.length + ' pasaran', 'kena ' + ev.pct.toFixed(2) + '% dari ' + ev.n + ' uji · lolos ' + ev.sig + '/' + ev.trials, [
+      { k: 'Acak', v: ev.chance.toFixed(0) + '%' },
+      { k: 'z', v: ev.z.toFixed(2) },
+      { k: 'Lolos Bonferroni', v: String(ev.sigBonf) },
+      { k: 'Top', v: ev.top.map(r => r.name + ' ' + r.label + ' z=' + r.z.toFixed(1)).join(' · ') || '-' }
+    ]);
     return say('UJI JUJUR semua pasaran (OUT ' + A.out + ', tiap prediksi hanya memakai data sebelumnya):\nAi kena ' + ev.pct.toFixed(2) + '% dari ' + ev.n + ' tebakan-digit; acak murni ' + ev.chance.toFixed(0) + '%; z=' + ev.z.toFixed(2) + '.\nPosisi-pasaran lolos z>1,64: ' + ev.sig + '/' + ev.trials + ' (kebetulan diperkirakan ±' + ev.sigExpected.toFixed(0) + '); lolos setelah koreksi banyak-uji: ' + ev.sigBonf + '.\n' + verdictText(ev.z, ev.sig, ev.sigExpected, ev.sigBonf));
   }
   if(/^uji/.test(t)){
@@ -412,11 +527,18 @@ async function handle(rawText){
     const rs = B.evalState(st, A.out);
     const lines = rs.map(r => r.label + ': kena ' + r.pct.toFixed(1) + '% (acak ' + r.chance.toFixed(0) + '%) dari ' + r.n + ' uji, z=' + r.z.toFixed(2) + ' · paruh awal ' + r.pctA.toFixed(0) + '% → paruh akhir ' + r.pctB.toFixed(0) + '%');
     const anySig = rs.filter(r => r.z > 1.645).length;
+    const avgPct = rs.length ? rs.reduce((s, r) => s + r.pct, 0) / rs.length : 0;
+    pushLog('uji', cur, 'kena rata² ' + avgPct.toFixed(1) + '% (acak ' + (rs[0] ? rs[0].chance.toFixed(0) : '-') + '%) · ' + anySig + '/' + rs.length + ' lolos',
+      rs.map(r => ({ k: r.label, v: 'kena ' + r.pct.toFixed(1) + '% z=' + r.z.toFixed(2) + ' · awal ' + r.pctA.toFixed(0) + '%→akhir ' + r.pctB.toFixed(0) + '%' })));
     return say('UJI JUJUR ' + cur + ' (OUT ' + A.out + ', mulai baris ke-' + B.EVAL_FROM + '):\n' + lines.join('\n') + '\n' + (anySig ? '🟡 ' + anySig + ' dari ' + rs.length + ' posisi terlihat di atas acak; dengan banyak posisi dan pasaran, sebagian pasti kebetulan. Bandingkan dengan “uji semua”.' : '⚪ Belum ada bukti pola di pasaran ini.'));
   }
   if(/^(eksperimen|lab)/.test(t)){
     const st = cur && A.states[cur]; if(!st) return say('Pasaran ini belum dipelajari. Ketik “belajar”.');
     const r = B.forceLab(st, ms[cur].C); save(); refreshPredict(true); persistBrain(cur, st);
+    pushLog('eksperimen', cur, 'dicoba ' + r.tried + ' · diterima ' + r.admitted, [
+      { k: 'OUT', v: String(A.out) },
+      { k: 'Diterima', v: r.admitted ? 'kombinasi baru dipakai' : 'tidak ada yang lolos' }
+    ]);
     return say('Lab eksperimen ' + cur + ': mencoba ' + r.tried + ' gabungan pakar, diterima ' + r.admitted + ' (hanya yang untung nyata di data latih DAN validasi). ' + (r.admitted ? 'Kombinasi baru ikut dipertimbangkan, tapi bobotnya tetap ditentukan hasil nyata ke depan.' : 'Tidak ada yang lolos — itu wajar kalau datanya memang acak.'));
   }
   if((m = t.match(/^(?:kenapa|alasan|jelaskan)(?:\s+([a-z]))?/))){
@@ -453,8 +575,40 @@ async function handle(rawText){
     const off = Object.keys(A.famOff).filter(k => A.famOff[k]);
     return say('Kelompok pakar: NRL, ML, MB, IDX, BHG, PK (formula Formula X), SENDIRI (frekuensi, jarak, transisi, pengulangan), KOMBINASI (hasil lab). Dimatikan: ' + (off.length ? off.join(', ') : 'tidak ada') + '.');
   }
+  if((m = t.match(/^filter\s+ikut\s+(\d+)$/))){
+    const n = +m[1]; if(n < 1 || n > 9) return say('Angka Ikut harus 1–9 digit.');
+    A.nIkut = n; save(); refreshPredict(true); return say('Siap. Filter Angka Ikut sekarang ' + n + ' digit. Ketik “filter” untuk mengisinya ke Generator.');
+  }
+  if(/^(?:angka\s+)?filter/.test(t)) return runFilter();
+  if(/^kirim\s*semua/.test(t)) return sendToGenerator(true);
   if(/^kirim/.test(t)) return sendToGenerator();
   if(/^rapor/.test(t)) return say(raporText());
+  if(/^sumber/.test(t)){
+    const fb = readFirebaseMap(), fbN = Object.keys(fb).length, imN = Object.keys(A.imported).length;
+    const dup = Object.keys(A.imported).filter(k => k in fb).length;
+    let shape = '(peta Firebase kosong / tidak ditemukan)';
+    try{
+      const ents = (typeof firebaseMarketMap !== 'undefined' && firebaseMarketMap) ? ((firebaseMarketMap instanceof Map) ? Array.from(firebaseMarketMap.entries()) : Object.entries(firebaseMarketMap)) : [];
+      if(ents.length){ const [k, v] = ents[0]; shape = 'contoh entri: kunci "' + k + '" → ' + (typeof v === 'string' ? 'teks' : 'objek {' + Object.keys(v || {}).slice(0, 6).join(', ') + '}') + (v && v.name ? ', name "' + v.name + '"' : ''); }
+    }catch(e){}
+    const act = resolveActive(ms);
+    return say('SUMBER DATA Ai:\n• Pasaran aktif di Periode: ' + (activeLabels().join(' | ') || '(tidak ada)') + '\n• Cocok di Ai: ' + (act.name ? act.name + ' (sumber ' + (A.src[act.name] || '?') + ')' : '⚠️ TIDAK ADA' + (act.miss ? ' (label "' + act.miss + '")' : '')) + '\n• Ai sedang memakai: ' + (cur || '-') + (cur ? ' (' + (A.src[cur] || '?') + ', ' + ms[cur].C.length + ' data)' : '') + '\n• Pasaran dari Firebase: ' + fbN + ' · dari impor JSON: ' + imN + (dup ? ' (' + dup + ' nama sama dgn Firebase → Firebase yang dipakai)' : '') + '\n• ' + shape);
+  }
+  if((m = t.match(/^kunci(?:\s+(.*))?$/))){
+    const arg = (m[1] || '').trim();
+    if(!arg){
+      return say(A.xrefNames.length
+        ? 'Pasaran kunci (referensi silang) saat ini: ' + A.xrefNames.join(', ') + '. Ketik "kunci NAMA1,NAMA2" utk ganti, atau "kunci mati" utk matikan.'
+        : 'Belum ada pasaran kunci diatur (fitur silang-pasaran mati). Ketik mis. "kunci HK,SDY,SGP" utk mengaktifkan.');
+    }
+    if(/^(mati|off|nonaktif|kosong|hapus)$/.test(arg)){
+      A.xrefNames = []; A.states = {}; save();
+      return say('Pasaran kunci dimatikan. Semua hasil belajar direset bersih (supaya susunan pakar konsisten) — ketik "belajar semua" utk mulai lagi.');
+    }
+    const names = arg.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    A.xrefNames = names; A.states = {}; save();
+    return say('Pasaran kunci diset: ' + names.join(', ') + '. Semua hasil belajar direset bersih (supaya susunan pakar konsisten dgn kunci baru) — ketik "belajar semua" utk mulai lagi. Nama yang tidak ketemu datanya otomatis dilewati saat belajar.');
+  }
   if((m = t.match(/^(?:tampilkan|lihat)\s+test\s+(.+)$/))){
     const q = m[1].trim().toUpperCase();
     const name = Object.keys(A.states).find(k => k.toUpperCase() === q);
@@ -475,7 +629,7 @@ async function handle(rawText){
 }
 
 function helpText(){
-  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• tampilkan test [pasaran] (dari ingatan, tanpa hitung ulang)\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• sumber (cek data mana yang dipakai Ai)\n• kirim (ke Generator) · rapor\n\nKalau kalimat Anda tidak mirip perintah manapun, saya coba tebak & tanya konfirmasi dulu (sekali dikonfirmasi, saya ingat terus). Kalau memang bukan perintah, saya jawab santai lewat obrolan bebas.';
+  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• tampilkan test [pasaran] (dari ingatan, tanpa hitung ulang)\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• kunci HK,SDY,SGP (referensi silang-pasaran) · kunci mati\n• sumber (cek data mana yang dipakai Ai)\n• filter (belajar + uji + isi semua angka filter) · uji filter (hanya uji) · filter ikut 5\n• kirim (ke Generator) · kirim semua (pool + filter) · rapor\n\nKalau kalimat Anda tidak mirip perintah manapun, saya coba tebak & tanya konfirmasi dulu (sekali dikonfirmasi, saya ingat terus). Kalau memang bukan perintah, saya jawab santai lewat obrolan bebas.';
 }
 function predText(r){
   return 'Pasaran ' + r.name + ' (' + r.n + ' data' + (r.newRows ? ', +' + r.newRows + ' baru dipelajari' : '') + '):\n' + r.pr.map(x => x.label + ' [' + x.digits.join(' ') + '] · peluang gabungan ' + (x.mass * 100).toFixed(1) + '% vs acak ' + (x.chance * 100).toFixed(0) + '%' + (x.wNull > 0.5 ? ' ≈ acak' : '')).join('\n') + '\n' + (r.pr.every(x => x.wNull > 0.5) ? 'Ai sendiri menilai belum ada pola yang terbukti di pasaran ini — angka di atas hampir setara pilihan acak.' : 'Selisih kecil dari acak itu normal; cek “uji” untuk bukti ke belakang.');
@@ -502,7 +656,7 @@ function raporText(){
   return 'RAPOR BELAJAR (OUT ' + A.out + ', ' + sts.length + ' pasaran): paruh awal masa uji ' + (sa / c).toFixed(2) + '% → paruh akhir ' + (sb / c).toFixed(2) + '% (acak ' + chance + '%).\n' + (Math.abs(sb / c - chance) < 0.7 && Math.abs(sa / c - chance) < 0.7 ? 'Keduanya masih setara acak: Ai belum menemukan pola yang membuatnya lebih baik dari tebakan.' : 'Ada selisih dari acak; pastikan dengan “uji semua” (memakai uji signifikansi).') + '\nTiap data baru yang masuk otomatis dipelajari (tanpa mengulang dari awal).';
 }
 
-function sendToGenerator(){
+async function sendToGenerator(withFilter){
   const pr = A.lastPred; if(!pr) return say('Belum ada prediksi. Ketik “prediksi”.');
   if(typeof fxGen1Locked !== 'undefined' && fxGen1Locked) return say('Gen 1 sedang terkunci (Mode Auto/Semi Auto atau LOCK GEN 1). Buka kuncinya dulu supaya angka Ai tidak bentrok.');
   const pools = pr.map(x => x.digits.map(String));
@@ -515,7 +669,117 @@ function sendToGenerator(){
     if(fc && fc.style.display === 'block' && typeof resetFilters === 'function') resetFilters();
   }catch(e){ return say('Angka masuk kolom Generator, tapi pembuatan kombinasi gagal: ' + e.message); }
   say('Angka Ai dikirim ke Generator: ' + bo.value);
+  if(withFilter) await runFilter();
   if(typeof window.goPage === 'function') window.goPage('generator');
+}
+
+// ---------- Angka filter (Filter Pangkas Kombinasi di Generator) ----------
+// Banyak nilai per filter mengikuti dropdown yang sudah ada di tab Analisis (Output Ai AC/CK/KE, rekomendasi
+// Jumlah/Selisih, jumlah Shio) supaya hasil Ai sebanding dengan tombol Cari/Prediksi bawaan; Angka Ikut pakai A.nIkut.
+function filterCounts(){
+  const num = (id, def) => { const el = document.getElementById(id); const v = el ? parseInt(el.value, 10) : NaN; return (Number.isInteger(v) && v >= 1 && v <= 11) ? v : def; };
+  const ai = part => { let v = null; try{ if(typeof getAiDigitCount === 'function') v = getAiDigitCount(part); }catch(e){} return v || 5; };
+  return { AC: ai('AC'), CK: ai('CK'), KE: ai('KE'), jumlah: Math.min(9, num('jsRecoCountJumlah', 5)), selisih: Math.min(9, num('jsRecoCountSelisih', 5)), shio: num('shioPickCount', 5), ikut: A.nIkut || 4 };
+}
+function applyFilterNumbers(fn){
+  const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
+  fn.items.forEach(it => {
+    if(it.id === 'AC') set('filterAiAC', it.digits.join(''));
+    else if(it.id === 'CK') set('filterAiCK', it.digits.join(''));
+    else if(it.id === 'KE') set('filterCB', it.digits.join(''));
+    else if(it.id === 'IKUT') set('filterAI', it.digits.join(''));
+    else if(it.id === 'JUMLAH') set('filterJumlah', it.digits.join(','));
+    else if(it.id === 'SELISIH') set('filterSelisih', it.digits.join(','));
+    else if(it.id === 'SHIO'){
+      const pick = new Set(it.digits), boxes = document.querySelectorAll('.shioPick');
+      boxes.forEach(cb => { cb.checked = pick.has(parseInt(cb.dataset.shio, 10)); });
+      const all = document.getElementById('filterShioAll');
+      if(all) all.checked = (boxes.length > 0 && document.querySelectorAll('.shioPick:checked').length === boxes.length);
+      try{ if(typeof updateShioPickNote === 'function') updateShioPickNote(); }catch(e){}
+    }
+  });
+  try{ if(typeof lastTop8Pools !== 'undefined' && lastTop8Pools.length && typeof applyFilters === 'function') applyFilters(); }catch(e){ console.error('Mode Ai: gagal menerapkan filter', e); }
+}
+function fmtSet(it){ return it.id === 'SHIO' ? it.digits.join(', ') : ((it.id === 'JUMLAH' || it.id === 'SELISIH') ? it.digits.join(',') : it.digits.join('')); }
+// Tanda pengenal hasil filter: berubah kalau pasaran / data terakhir / jumlah opsi / OUT / pin-buang berubah -> hasil belajar lama dianggap basi
+function filterSig(name, pm, counts, outArg){
+  const C = pm && pm.C ? pm.C : [];
+  return [name, C.length, C.length ? C[C.length - 1].join('') : '', JSON.stringify(counts), JSON.stringify(outArg), JSON.stringify(A.pin), JSON.stringify(A.ban)].join('|');
+}
+function testLine(it, detail){
+  const t = it.test;
+  let s = it.label + ' [' + fmtSet(it) + '] · kena ' + t.pct.toFixed(0) + '% vs acak ' + t.chance.toFixed(0) + '%, z=' + t.z.toFixed(1);
+  if(it.useless) s += ' (hampir semua kombinasi ikut lolos → nyaris tidak memangkas)';
+  if(detail) s += '\n   pakar: ' + it.experts.map(e => e.id + ' ' + e.pct.toFixed(0) + '%').join(' · ') + ' · bobot acak ' + (it.wNull * 100).toFixed(0) + '%';
+  return s;
+}
+function filterVerdict(fl){
+  if(fl.sigBonf > 0) return '✅ ' + fl.sigBonf + ' filter tetap signifikan setelah koreksi banyak-uji → kemungkinan ada pola nyata. Ulangi setelah ada data baru untuk memastikan.';
+  if(fl.sig >= 2) return '🟡 ' + fl.sig + ' dari ' + fl.trials + ' filter terlihat di atas acak (kebetulan murni diperkirakan ±' + fl.sigExpected.toFixed(1) + '), tapi belum cukup kuat untuk dipercaya.';
+  return '⚪ Belum ada bukti pola di filter mana pun: hasil Ai setara acak. Ini jawaban jujur dari data saat ini, bukan kegagalan program.';
+}
+function filterReport(name, fl, filled){
+  const outTxt = Array.isArray(fl.out) ? fl.out.join('/') : A.out;
+  let txt = (filled ? 'ANGKA FILTER ' : 'UJI FILTER ') + name + ' (' + fl.K + ' baris terakhir, tiap baris hanya memakai data sebelumnya; OUT ' + outTxt + '):\n' +
+    fl.items.map(it => testLine(it, !filled)).join('\n') +
+    '\n“acak” = porsi kombinasi pool yang ikut lolos filter itu (peluang lolos kalau tebakan digit pool acak).\n' + filterVerdict(fl);
+  if(filled){
+    const hasGen = (typeof lastTop8Pools !== 'undefined' && lastTop8Pools.length);
+    txt += '\nAngka filter (hasil suara pakar berbobot: Model, Cover 15, Cover 30, Frekuensi 30) sudah diisi ke kotak Filter Pangkas Kombinasi' + (hasGen ? ' dan diterapkan.' : ' (belum ada pool di Generator — ketik “kirim semua” supaya pool ikut dikirim).');
+    if(fl.L !== 4) txt += '\nCatatan: filter Ai AC/CK/KE, Jumlah, Selisih, dan Shio hanya untuk data 4D — pasaran ini ' + fl.L + ' digit, jadi hanya Angka Ikut yang diisi.';
+  } else {
+    txt += '\n(Tidak mengisi filter Generator — ketik “filter” untuk mengisinya.) Pakar terbaik dipilih setelah hasil dilihat, jadi jangan dipercaya sendirian.';
+  }
+  return txt;
+}
+// Belajar + uji jalan-maju filter untuk pasaran aktif. Bahan uji (st.recP = peluang prediksi yang disimpan SEBELUM hasil
+// diketahui, REC_K baris terakhir) ikut tersimpan di otak; kalau belum ada (otak lama), pasaran itu dipelajari ulang sekali dari awal.
+async function computeFilterLearn(){
+  const ms = markets(), name = pickDefaultCur(ms);
+  if(!name){ say('Belum ada data pasaran untuk dipelajari.'); return null; }
+  A.cur = name;
+  const pm = ms[name];
+  A.busy = true; setBusy(true);
+  try{
+    let r = predictCur();   // pastikan otak sudah belajar sampai data terakhir
+    if(!r){ say('Belum ada data pasaran untuk diprediksi.'); return null; }
+    let st = r.st;
+    const need = Math.min(B.REC_K, st.t - B.T0);
+    if(!(st.recP && st.recP[0] && st.recP[0].length >= need)){
+      say('Bahan uji filter untuk ' + name + ' belum ada di ingatan Ai — belajar ulang pasaran ini dari awal (cukup sekali)…');
+      setStatus('Belajar ulang ' + name + ' untuk uji filter…'); await tick();
+      const { extRefs, refSeries } = buildRefSeriesFor(name, collectTexts());
+      st = B.learnMarket(name, pm.C, pm.L, { tilt: A.tilt, dates: pm.dates, extRefs, refSeries });   // tanpa state -> mulai bersih
+      A.states[name] = st; save(); persistBrainSoon(name);
+      r = predictCur(); st = r.st;
+    }
+    const counts = filterCounts();
+    const outArg = st.L === 0 ? A.out : Array.from({ length: st.L }, (_, p) => A.outPos[p] || A.out);
+    setStatus('Menguji filter ' + name + '…'); await tick();
+    const fl = B.filterLearn(st, pm.C, counts, outArg, { pr: r.pr });
+    if(!fl){ say('Data ' + name + ' belum cukup untuk menguji filter (butuh minimal ' + (B.T0 + 10) + ' baris yang sudah dipelajari).'); return null; }
+    fl.src = 'belajar'; fl.out = outArg; fl.name = name; fl.sig = filterSig(name, pm, counts, outArg);
+    A.lastFilter = fl;
+    return { name, fl };
+  }catch(e){
+    console.error('Mode Ai: gagal belajar/uji filter', e);
+    say('⚠️ Belajar/uji filter terhenti karena error: ' + (e && e.message ? e.message : e));
+    return null;
+  }finally{
+    A.busy = false; setBusy(false);
+  }
+}
+async function runFilter(){
+  const res = await computeFilterLearn();
+  if(!res){ renderAll(); return; }
+  applyFilterNumbers(res.fl);
+  renderAll();
+  say(filterReport(res.name, res.fl, true));
+}
+async function runFilterTest(){
+  const res = await computeFilterLearn();
+  renderAll();
+  if(res) say(filterReport(res.name, res.fl, false));
 }
 
 // ---------- Impor JSON export ----------
@@ -555,6 +819,43 @@ function renderChat(){
   el.innerHTML = A.chat.map(m => '<div style="margin:0 0 8px; text-align:' + (m.who === 'user' ? 'right' : 'left') + ';"><span style="display:inline-block; max-width:92%; white-space:pre-wrap; text-align:left; padding:7px 10px; border-radius:10px; font-size:12.5px; line-height:1.4; background:' + (m.who === 'user' ? 'var(--panel-2)' : 'rgba(45,212,191,.08)') + '; border:1px solid var(--line);">' + esc(m.text) + '</span></div>').join('');
   el.scrollTop = el.scrollHeight;
 }
+
+// ---------- Log Hasil (uji / uji semua / eksperimen / prediksi) ----------
+// Ditampilkan sebagai tabel di bawah #aimChat. Kolom utama sama untuk semua jenis (Waktu/Jenis/
+// Pasaran/Ringkasan) supaya tabelnya tetap rapi; field yang berbeda tiap sumber (per-posisi, per-pakar,
+// dll) disimpan di entry.detail dan baru dirender saat baris di-expand ("▾ detail").
+const MAX_LOG = 20;
+const LOG_TYPE_LABEL = { prediksi: '🎯 Prediksi', uji: '🧪 Uji', uji_semua: '🧪 Uji Semua', eksperimen: '🔬 Eksperimen' };
+function pushLog(type, market, summary, detail){
+  A.resultLog.unshift({ ts: Date.now(), type, market: market || '-', summary, detail: detail || [] });
+  if(A.resultLog.length > MAX_LOG) A.resultLog.length = MAX_LOG;
+  renderResultLog();
+}
+function renderResultLog(){
+  const el = card && card.querySelector('#aimResultLog'); if(!el) return;
+  if(!A.resultLog.length){ el.innerHTML = '<p class="hint" style="margin:0; padding:8px;">Belum ada hasil uji/eksperimen/prediksi.</p>'; return; }
+  const rows = A.resultLog.map((e, i) => {
+    const time = new Date(e.ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    const detailRows = e.detail.map(d => '<div style="display:flex; gap:6px; padding:2px 0;"><b style="min-width:70px; color:var(--amber); font-size:11px;">' + esc(d.k) + '</b><span style="font-size:11px; font-family:var(--mono);">' + esc(d.v) + '</span></div>').join('');
+    return '<tr style="border-bottom:1px solid var(--line);">' +
+      '<td style="padding:6px 8px; font-size:11px; white-space:nowrap; vertical-align:top;">' + time + '</td>' +
+      '<td style="padding:6px 8px; font-size:11px; white-space:nowrap; vertical-align:top;">' + esc(LOG_TYPE_LABEL[e.type] || e.type) + '</td>' +
+      '<td style="padding:6px 8px; font-size:11px; white-space:nowrap; vertical-align:top;">' + esc(e.market) + '</td>' +
+      '<td style="padding:6px 8px; font-size:11px; vertical-align:top;">' + esc(e.summary) +
+        (detailRows ? '<div class="aimLogToggle" data-i="' + i + '" style="margin-top:3px; font-size:10.5px; color:var(--teal); cursor:pointer; user-select:none;">▾ detail</div><div class="aimLogDetail" data-i="' + i + '" style="display:none; margin-top:4px; padding-top:4px; border-top:1px dashed var(--line);">' + detailRows + '</div>' : '') +
+      '</td></tr>';
+  }).join('');
+  el.innerHTML = '<table style="width:100%; border-collapse:collapse; min-width:480px;"><thead><tr style="border-bottom:1px solid var(--line);">' +
+    '<th style="padding:6px 8px; text-align:left; font-size:10.5px; text-transform:uppercase; color:var(--ink-dim); white-space:nowrap;">Waktu</th>' +
+    '<th style="padding:6px 8px; text-align:left; font-size:10.5px; text-transform:uppercase; color:var(--ink-dim); white-space:nowrap;">Jenis</th>' +
+    '<th style="padding:6px 8px; text-align:left; font-size:10.5px; text-transform:uppercase; color:var(--ink-dim); white-space:nowrap;">Pasaran</th>' +
+    '<th style="padding:6px 8px; text-align:left; font-size:10.5px; text-transform:uppercase; color:var(--ink-dim);">Ringkasan</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table>';
+  el.querySelectorAll('.aimLogToggle').forEach(t => t.addEventListener('click', () => {
+    const d = el.querySelector('.aimLogDetail[data-i="' + t.dataset.i + '"]');
+    if(d) d.style.display = d.style.display === 'none' ? '' : 'none';
+  }));
+}
 function renderAll(){
   if(!card) return;
   const ms = markets(), names = Object.keys(ms).sort();
@@ -563,7 +864,7 @@ function renderAll(){
   sel.innerHTML = names.length ? names.map(n => '<option value="' + esc(n) + '"' + (n === A.cur ? ' selected' : '') + '>' + esc(n) + (A.states[n] ? ' ✓' : '') + '</option>').join('') : '<option value="">— belum ada data —</option>';
   card.querySelector('#aimOut').value = String(A.out);
   const learned = Object.keys(A.states).length;
-  setStatus(names.length + ' pasaran tersedia · ' + learned + ' sudah dipelajari' + (A.cur ? ' · aktif ' + A.cur + ' (' + ms[A.cur].C.length + ' data, sumber: ' + (A.src[A.cur] || '?') + ')' : '') + (A.activeMiss && A.activeMiss.toUpperCase() !== String(A.cur).toUpperCase() ? '\n⚠️ Pasaran aktif di Periode “' + A.activeMiss + '” tidak ditemukan di data Ai (atau datanya < 12 baris) — ketik “sumber” untuk cek.' : '') + (A.globalNote ? '\n' + A.globalNote : ''));
+  setStatus(names.length + ' pasaran tersedia · ' + learned + ' sudah dipelajari' + (A.cur ? ' · aktif ' + A.cur + ' (' + ms[A.cur].C.length + ' data, sumber: ' + (A.src[A.cur] || '?') + ')' : '') + (A.activeMiss && A.activeMiss.toUpperCase() !== String(A.cur).toUpperCase() ? '\n⚠️ Pasaran aktif di Periode "' + A.activeMiss + '" tidak ditemukan di data Ai (atau datanya < 12 baris) — ketik "sumber" untuk cek.' : '') + (A.globalNote ? '\n' + A.globalNote : ''));
   const box = card.querySelector('#aimResult');
   if(!A.lastPred || !A.cur){ box.innerHTML = '<p class="hint" style="margin:0;">Belum ada prediksi. Tekan “🎯 Prediksi”.</p>'; }
   else {
@@ -574,7 +875,19 @@ function renderAll(){
       return '<div style="display:flex; align-items:center; gap:8px; margin:4px 0;"><b style="width:18px; color:var(--amber);">' + x.label + '</b><div style="flex:1; min-width:0;">' + chips + '</div><span class="hint" style="margin:0; font-size:11px; white-space:nowrap;">' + tag + '</span></div>';
     }).join('');
   }
+  const fbox = card.querySelector('#aimFilter');
+  if(fbox){
+    const f = A.lastFilter;
+    if(!f || !f.items || !f.items.length || !A.cur){ fbox.innerHTML = ''; }
+    else {
+      const head = f.src === 'belajar' ? 'Angka filter · sudah diuji ' + f.K + ' baris (kena vs acak)' : 'Angka filter · model saja, belum diuji (tekan 🎛️ untuk belajar + uji)';
+      fbox.innerHTML = '<div class="hint" style="margin:0 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:.06em;">' + esc(head) + '</div>' + f.items.map(it =>
+        '<div style="display:flex; align-items:center; gap:8px; margin:3px 0;"><b style="min-width:74px; color:var(--amber); font-size:12px;">' + esc(it.label) + '</b><span style="flex:1; min-width:0; font-family:var(--mono); font-weight:700;">' + esc(fmtSet(it)) + '</span><span class="hint" style="margin:0; font-size:11px; white-space:nowrap;">' + (it.p * 100).toFixed(0) + '% vs ' + (it.chance * 100).toFixed(0) + '%</span></div>'
+      ).join('');
+    }
+  }
   renderChat();
+  renderResultLog();
 }
 
 function buildCard(){
@@ -590,6 +903,7 @@ function buildCard(){
       '<select id="aimOut" class="fxSelect" style="width:78px;">' + [4,5,6,7,8,9].map(n => '<option value="' + n + '">OUT ' + n + '</option>').join('') + '</select>' +
     '</div>' +
     '<div id="aimResult" style="margin:6px 0 10px;"></div>' +
+    '<div id="aimFilter" style="margin:0 0 10px;"></div>' +
     '<div class="row" style="gap:6px; flex-wrap:wrap; margin-bottom:10px;">' +
       '<button class="btn" data-cmd="prediksi">🎯 Prediksi</button>' +
       '<button class="btn" data-cmd="belajar semua">🧠 Belajar Semua</button>' +
@@ -598,10 +912,16 @@ function buildCard(){
       '<button class="btn" data-cmd="eksperimen">🔬 Eksperimen</button>' +
       '<button class="btn" data-cmd="kenapa">💬 Kenapa?</button>' +
       '<button class="btn" data-cmd="kirim">📤 Ke Generator</button>' +
+      '<button class="btn" data-cmd="filter">🎛️ Isi Angka Filter</button>' +
+      '<button class="btn" data-cmd="uji filter">🧪 Uji Filter</button>' +
       '<button class="btn" id="aimImportBtn">📥 Impor JSON</button>' +
       '<input type="file" id="aimImportFile" accept=".json,application/json" style="display:none;">' +
     '</div>' +
     '<div id="aimChat" style="max-height:260px; overflow:auto; padding:8px; border:1px solid var(--line); border-radius:10px; background:var(--panel-2);"></div>' +
+    '<div style="margin-top:10px;">' +
+      '<div class="hint" style="margin:0 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:.06em;">📊 Log Hasil</div>' +
+      '<div id="aimResultLog" style="max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:10px; background:var(--panel-2);"></div>' +
+    '</div>' +
     '<div class="row" style="gap:6px; margin-top:8px;">' +
       '<input type="text" id="aimCmd" placeholder="Ketik perintah… (bantuan)" autocomplete="off" style="flex:1; min-width:0; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-size:14px; padding:9px 12px; border-radius:9px;">' +
       '<button class="btn" id="aimSend">Kirim</button>' +
