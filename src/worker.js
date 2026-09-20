@@ -501,7 +501,7 @@ export default {
         if (!messages.length) {
           return Response.json({ ok: false, error: 'messages kosong' }, { status: 400 });
         }
-        const res = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+        const res = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
           messages,
           max_tokens: 400
         });
