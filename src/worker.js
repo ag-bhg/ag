@@ -511,6 +511,49 @@ export default {
       }
     }
 
+    // Endpoint TAHAP 1 (shadow-track): minta Cloudflare AI menebak N digit per posisi untuk draw
+    // BERIKUTNYA (belum ikut campuran bobot pakar aiBrain — cuma dicatat & dibandingkan nanti oleh
+    // aiMode.js). Jawaban WAJIB JSON murni; kalau tidak valid, balikkan error jelas (bukan fallback diam-diam).
+    if (url.pathname === '/api/ai-guess' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const labels = Array.isArray(body.labels) ? body.labels : [];
+        const out = Number(body.out) || 8;
+        const context = String(body.context || '').slice(0, 6000); // batasi, hemat kuota & token
+        if (!labels.length) {
+          return Response.json({ ok: false, error: 'labels kosong' }, { status: 400 });
+        }
+        const sys = {
+          role: 'system',
+          content:
+            'Anda alat analisis statistik. Tugas: dari KONTEKS data di bawah, keluarkan tebakan ' + out +
+            ' digit (0-9, tidak boleh berulang) untuk MASING-MASING posisi berikut: ' + labels.join(', ') +
+            '. JAWAB HANYA JSON MURNI, TANPA teks lain, TANPA markdown, format persis: {' +
+            labels.map(l => '"' + l + '":[d,d,...]').join(',') +
+            '} dengan tiap array berisi ' + out + ' digit unik. Kalau ragu, tetap keluarkan tebakan terbaik berdasar pola di data — jangan menolak.\n\nKONTEKS:\n' + context
+        };
+        const res = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+          messages: [sys],
+          max_tokens: 300
+        });
+        let raw = String(res.response || '').trim();
+        raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/, '').trim();
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch (e) {
+          return Response.json({ ok: false, error: 'Jawaban Ai bukan JSON valid: ' + raw.slice(0, 200) }, { status: 502 });
+        }
+        for (const lab of labels) {
+          const arr = parsed[lab];
+          if (!Array.isArray(arr) || !arr.length || arr.some(d => !Number.isInteger(d) || d < 0 || d > 9)) {
+            return Response.json({ ok: false, error: 'Format tebakan posisi ' + lab + ' tidak valid' }, { status: 502 });
+          }
+        }
+        return Response.json({ ok: true, guess: parsed });
+      } catch (e) {
+        return Response.json({ ok: false, error: String(e) }, { status: 500 });
+      }
+    }
+
     const match = url.pathname.match(/^\/api\/settings\/([^/]+)$/);
     if (match) {
       const pasaran = decodeURIComponent(match[1]);
