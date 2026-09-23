@@ -536,11 +536,15 @@ export default {
           messages: [sys],
           max_tokens: 300
         });
-        let raw = String(res.response || '').trim();
-        raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/, '').trim();
-        let parsed;
-        try { parsed = JSON.parse(raw); } catch (e) {
-          return Response.json({ ok: false, error: 'Jawaban Ai bukan JSON valid: ' + raw.slice(0, 200) }, { status: 502 });
+        let raw = res.response, parsed;
+        if (raw && typeof raw === 'object') {
+          parsed = raw; // Cloudflare AI kadang sudah balikin objek langsung (bukan teks JSON)
+        } else {
+          raw = String(raw || '').trim();
+          raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/, '').trim();
+          try { parsed = JSON.parse(raw); } catch (e) {
+            return Response.json({ ok: false, error: 'Jawaban Ai bukan JSON valid: ' + raw.slice(0, 200) }, { status: 502 });
+          }
         }
         for (const lab of labels) {
           const arr = parsed[lab];
