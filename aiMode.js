@@ -756,6 +756,33 @@ async function handle(rawText){
       rs.map(r => ({ k: r.label, v: 'kena ' + r.pct.toFixed(1) + '% z=' + r.z.toFixed(2) + ' · awal ' + r.pctA.toFixed(0) + '%→akhir ' + r.pctB.toFixed(0) + '%' })));
     return say('UJI JUJUR ' + cur + ' (OUT ' + A.out + ', mulai baris ke-' + B.EVAL_FROM + '):\n' + lines.join('\n') + '\n' + (anySig ? '🟡 ' + anySig + ' dari ' + rs.length + ' posisi terlihat di atas acak; dengan banyak posisi dan pasaran, sebagian pasti kebetulan. Bandingkan dengan “uji semua”.' : '⚪ Belum ada bukti pola di pasaran ini.'));
   }
+  if(/^uji\s*prediksi\s*4d|^prediksi\s*4d\s*uji/.test(t)){
+    const res = await computeFilterLearn(); renderAll();
+    if(!res) return;
+    const ikut = res.fl.items.find(it => it.id === 'IKUT'); if(!ikut) return say('Belum bisa dihitung.');
+    return say('UJI PREDIKSI 4D ' + res.name + ' — 1 angka (' + ikut.digits.length + ' digit) buat SEMUA posisi (' + B.posLabels(res.fl.L).join(',') + ') sekaligus, tiap baris cuma pakai data sebelumnya:\n' +
+      testLine(ikut, true) + '\n“acak” = peluang lolos kalau pool ' + ikut.digits.length + ' digit dipilih acak.\n' + (ikut.test.z > 1.645 ? '🟡/🟢 Ada indikasi di atas acak.' : '⚪ Setara acak — belum ada bukti.'));
+  }
+  if(/^prediksi\s*4d/.test(t)){
+    if(!A.lastPred){ const r = refreshPredict(); if(!r) return say('Belum ada data pasaran. Ketik “belajar” dulu.'); }
+    const fn = B.filterNumbers(A.lastPred, { ikut: A.nIkut || 8 });
+    const ikut = fn.items.find(it => it.id === 'IKUT'); if(!ikut) return say('Belum bisa dihitung.');
+    return say('PREDIKSI 4D ' + cur + ' — 1 angka buat SEMUA posisi (' + B.posLabels(fn.L).join(',') + ') sekaligus:\n' + ikut.digits.join(' ') +
+      '\nPeluang gabungan (minimal 1 posisi kena) ' + (ikut.p * 100).toFixed(1) + '% vs acak ' + (ikut.chance != null ? (ikut.chance * 100).toFixed(1) : '-') + '%.\nBelum ada bukti historisnya — ketik “uji prediksi 4d” buat cek akurasi ke belakang.');
+  }
+  if(/^uji\s*(?:gabungan|acke|4d)/.test(t)){
+    const st = cur && A.states[cur]; if(!st) return say('Pasaran ini belum dipelajari. Ketik “belajar”.');
+    const n = R[0] ? R[0].length : 0;
+    if(n < 10) return say('Data uji ' + cur + ' cuma ' + n + ' — terlalu sedikit untuk uji gabungan 4 posisi.');
+    let hit = 0; for(let i = 0; i < n; i++){ if(labels.every((lab, p) => R[p][i] < A.out)) hit++; }
+    const p0 = Math.pow(A.out / 10, labels.length), pct = hit / n;
+    const z = (hit - n * p0) / Math.sqrt(n * p0 * (1 - p0));
+    pushLog('uji gabungan', cur, 'kena ' + (pct * 100).toFixed(2) + '% (acak ' + (p0 * 100).toFixed(2) + '%) dari ' + n + ' uji, z=' + z.toFixed(2),
+      [{ k: 'Posisi', v: labels.join('+') }, { k: 'OUT', v: String(A.out) }]);
+    return say('UJI GABUNGAN (' + labels.join('+') + ') ' + cur + ' — harus kena BARENG di draw yang sama (OUT ' + A.out + '):\n' +
+      'Kena ' + hit + '/' + n + ' = ' + (pct * 100).toFixed(2) + '% (acak murni ' + (p0 * 100).toFixed(2) + '%), z=' + z.toFixed(2) + '.\n' +
+      (z > 1.96 ? '🟢 Jauh di atas acak — indikasi kuat ada pola gabungan nyata.' : (z > 1.645 ? '🟡 Sedikit di atas acak, belum cukup kuat.' : '⚪ Setara acak — belum ada bukti ke-4 posisi kompak berpola bareng.')));
+  }
   if(/^(eksperimen|lab)/.test(t)){
     const st = cur && A.states[cur]; if(!st) return say('Pasaran ini belum dipelajari. Ketik “belajar”.');
     const r = B.forceLab(st, ms[cur].C); save(); refreshPredict(true); persistBrain(cur, st);
@@ -867,7 +894,7 @@ async function handle(rawText){
 }
 
 function helpText(){
-  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• tampilkan test [pasaran] (dari ingatan, tanpa hitung ulang)\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• kunci HK,SDY,SGP (referensi silang-pasaran) · kunci mati\n• sumber (cek data mana yang dipakai Ai)\n• filter (belajar + uji + isi semua angka filter) · uji filter (hanya uji) · filter ikut 5\n• kirim (ke Generator) · kirim semua (pool + filter) · isi generator (sekali jalan: Gen 1 → Gen 2 → Filter) · isi gen2 A/B/C/semua (kunci Gen 2 pakai digit terlemah Ai) · rapor\n• tebak cf (minta tebakan Cloudflare AI, shadow-track) · uji cf (lihat akurasinya sejauh ini)\n• backtest cf [n] (uji cepat pakai data lama yang sudah ada, default 60 draw, feedback tiap giliran — TIDAK perlu nunggu draw baru)\n• pelajari zona (belajar Zona Aman Streak dari semua pasaran termuat, gratis/lokal) · eksekusi (rekomendasi eksekusi pasaran aktif, lapis tambahan — prediksi utama tetap sama)\n\nKalau kalimat Anda tidak mirip perintah manapun, saya coba tebak & tanya konfirmasi dulu (sekali dikonfirmasi, saya ingat terus). Kalau memang bukan perintah, saya jawab santai lewat obrolan bebas.';
+  return 'Perintah:\n• out 6 / out A 7 / out reset\n• pasaran BJI\n• prediksi\n• belajar / belajar semua\n• uji / uji semua\n• tampilkan test [pasaran] (dari ingatan, tanpa hitung ulang)\n• eksperimen (lab gabung pakar)\n• kenapa / kenapa A\n• pin A 3 5 · buang C 7 · lepas\n• tanpa bhg · dengan bhg · hanya sendiri · pakar\n• kunci HK,SDY,SGP (referensi silang-pasaran) · kunci mati\n• sumber (cek data mana yang dipakai Ai)\n• filter (belajar + uji + isi semua angka filter) · uji filter (hanya uji) · filter ikut 5\n• kirim (ke Generator) · kirim semua (pool + filter) · isi generator (sekali jalan: Gen 1 → Gen 2 → Filter) · isi gen2 A/B/C/semua (kunci Gen 2 pakai digit terlemah Ai) · rapor\n• tebak cf (minta tebakan Cloudflare AI, shadow-track) · uji cf (lihat akurasinya sejauh ini)\n• backtest cf [n] (uji cepat pakai data lama yang sudah ada, default 60 draw, feedback tiap giliran — TIDAK perlu nunggu draw baru)\n• pelajari zona (belajar Zona Aman Streak dari semua pasaran termuat, gratis/lokal) · eksekusi (rekomendasi eksekusi pasaran aktif, lapis tambahan — prediksi utama tetap sama)\n• uji gabungan (alias: uji acke/4d) — cek 4 posisi (A,C,K,E) harus kena BARENG di draw yang sama, bukan per-posisi\n• prediksi 4d — 1 angka dipakai buat SEMUA posisi ACKE sekaligus · uji prediksi 4d (cek akurasinya ke belakang)\n\nKalau kalimat Anda tidak mirip perintah manapun, saya coba tebak & tanya konfirmasi dulu (sekali dikonfirmasi, saya ingat terus). Kalau memang bukan perintah, saya jawab santai lewat obrolan bebas.';
 }
 function predText(r){
   return 'Pasaran ' + r.name + ' (' + r.n + ' data' + (r.newRows ? ', +' + r.newRows + ' baru dipelajari' : '') + '):\n' + r.pr.map(x => x.label + ' [' + x.digits.join(' ') + '] · peluang gabungan ' + (x.mass * 100).toFixed(1) + '% vs acak ' + (x.chance * 100).toFixed(0) + '%' + (x.wNull > 0.5 ? ' ≈ acak' : '')).join('\n') + '\n' + (r.pr.every(x => x.wNull > 0.5) ? 'Ai sendiri menilai belum ada pola yang terbukti di pasaran ini — angka di atas hampir setara pilihan acak.' : 'Selisih kecil dari acak itu normal; cek “uji” untuk bukti ke belakang.');
