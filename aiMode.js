@@ -166,9 +166,20 @@ async function runCfBacktest(reqTestN){
 // "pelajari zona": pool streak dari SEMUA pasaran yang state-nya sudah dimuat (A.states) — makin banyak
 // pasaran sudah pernah diproses ("kirim"/sinkron), makin banyak sampel. Hasilnya (ambang zona aman)
 // disimpan GLOBAL (dipakai bareng), tapi keputusan EKSEKUSI tetap dihitung per pasaran secara terpisah.
-function learnZones(){
-  const names = Object.keys(A.states);
-  if(names.length < 3) return say('Baru ada ' + names.length + ' pasaran yang sudah dimuat/dipelajari. Minimal butuh beberapa pasaran supaya sampel streak cukup — proses ("kirim"/sinkron) beberapa pasaran dulu, baru "pelajari zona" lagi.');
+function learnZones(filterText){
+  let names = Object.keys(A.states);
+  let unmatched = [];
+  if(filterText && filterText.trim()){
+    const keys = filterText.trim().split(/[,\s]+/).filter(Boolean).map(k => k.toLowerCase());
+    const matched = new Set();
+    keys.forEach(k => {
+      const hit = names.filter(nm => nm.toLowerCase().includes(k) || k.includes(nm.toLowerCase()));
+      if(!hit.length) unmatched.push(k); else hit.forEach(nm => matched.add(nm));
+    });
+    names = Array.from(matched);
+  }
+  if(unmatched.length) say('⚠️ Kunci tidak ketemu pasarannya (dilewati): ' + unmatched.join(', ') + '. Pastikan nama/ejaan cocok dengan pasaran yang sudah dimuat sistem.');
+  if(names.length < 3) return say('Cuma ketemu ' + names.length + ' pasaran yang cocok (' + (names.join(', ') || '-') + '). Minimal butuh beberapa pasaran supaya sampel streak cukup — cek lagi kunci/ejaannya, atau proses ("kirim"/sinkron) pasarannya dulu.');
   const states = names.map(k => A.states[k]);
   const zones = B.computeStreakZones(states, A.out);
   A.streakZones = zones;
@@ -180,11 +191,55 @@ function learnZones(){
     return lab + ': ' + (safe.length ? 'streak ' + safe.map(r => r.streak).join(',') + ' aman (n=' + totalEv(lab) + ')' : 'belum ada streak aman (n=' + totalEv(lab) + ')');
   });
   const safeC = zones.combined.filter(r => r.safe);
-  say('📊 Zona Aman Streak dipelajari dari ' + names.length + ' pasaran (out=' + A.out + '):\n' + summary.join('\n') +
+  let msg = '📊 Zona Aman Streak dipelajari dari ' + names.length + ' pasaran (' + names.join(', ') + ', out=' + A.out + '):\n' + summary.join('\n') +
     '\nGabungan semua posisi: ' + (safeC.length ? 'streak ' + safeC.map(r => r.streak).join(',') + ' aman' : 'belum ada yang aman') +
-    '\nIni cuma acuan statistik (butuh min ' + 30 + ' kejadian per level biar dipercaya) — belum tentu berlaku selamanya, ulangi "pelajari zona" berkala.');
+    '\nIni cuma acuan statistik (butuh min ' + 30 + ' kejadian per level biar dipercaya) — belum tentu berlaku selamanya, ulangi "pelajari zona" berkala.';
+  const curOpen = pickDefaultCur(markets());
+  if(curOpen && A.states[curOpen]){
+    const bt = backtestZoneOnMarket(curOpen, zones, A.out);
+    if(bt && bt.executed >= 5){
+      const p0Comb = Math.pow(A.out / 10, A.states[curOpen].L);
+      const z = (bt.hitExec - bt.executed * p0Comb) / Math.sqrt(bt.executed * p0Comb * (1 - p0Comb));
+      msg += '\n\n🔬 Diuji langsung ke pasaran terbuka (' + curOpen + ', ' + bt.n + ' draw histori):\n' +
+        'Dieksekusi ' + bt.executed + 'x (dilewati/zigzag ' + bt.zigzag + 'x) → kena ' + (bt.execRate * 100).toFixed(1) + '% saat dieksekusi (acak murni ' + (p0Comb * 100).toFixed(1) + '%), z=' + z.toFixed(2) + '.\n' +
+        'Baseline tanpa filter zona sama sekali (semua draw dihitung): ' + (bt.baseRate * 100).toFixed(1) + '%.\n' +
+        (z > 1.645 ? '🟢 Menyaring pakai zona TERBUKTI lebih baik dari acak di histori pasaran ini.' : '⚪ Belum terbukti lebih baik dari acak di pasaran ini — dieksekusi atau tidak, hasilnya masih setara kebetulan.');
+    } else if(bt){
+      msg += '\n\n⚠️ Backtest ke pasaran terbuka (' + curOpen + '): cuma ' + bt.executed + ' draw yang masuk kondisi "dieksekusi" dari ' + bt.n + ' draw histori — terlalu sedikit untuk disimpulkan.';
+    }
+  }
+  say(msg);
 }
-// "eksekusi": keputusan untuk pasaran AKTIF saja, pakai streak berjalan pasaran itu sendiri (tidak
+// Simulasi jalan-maju: TERAPKAN aturan zona (hasil belajar) ke histori SATU pasaran (yang sedang
+// terbuka/aktif) — di tiap draw lama, hitung dulu streak SEBELUM draw itu (tidak bocor ke masa depan),
+// tentukan mode (AMAN_PER_POSISI/AMAN_GABUNGAN/ZIGZAG), baru dicek apakah draw itu jadi HIT kalau
+// "dieksekusi". Ini backtest aturan KEPUTUSANNYA, bukan backtest formula/pakar itu sendiri.
+function backtestZoneOnMarket(name, zones, out){
+  const st = A.states[name]; if(!st) return null;
+  const labels = st.reg.lab, R = labels.map((lab, p) => st.ranks[p]);
+  const n = R[0] ? R[0].length : 0;
+  let executed = 0, hitExec = 0, totalHit = 0, zigzag = 0;
+  for(let i = 0; i < n; i++){
+    const curStreaks = {};
+    labels.forEach((lab, p) => {
+      let s = 0; for(let k = i - 1; k >= 0; k--){ if(R[p][k] < out) s++; else break; }
+      curStreaks[lab] = s;
+    });
+    let safeCount = 0;
+    labels.forEach(lab => {
+      const zr = (zones.perLabel[lab] || []).find(r => r.streak === curStreaks[lab]);
+      if(zr && zr.safe) safeCount++;
+    });
+    const streakApprox = Math.min.apply(null, labels.map(l => curStreaks[l]));
+    const combZ = zones.combined.find(r => r.streak === streakApprox), combinedSafe = !!(combZ && combZ.safe);
+    const mode = safeCount === labels.length ? 'AMAN_PER_POSISI' : (combinedSafe ? 'AMAN_GABUNGAN' : 'ZIGZAG');
+    const hitAll = labels.every((lab, p) => R[p][i] < out);
+    if(mode !== 'ZIGZAG'){ executed++; if(hitAll) hitExec++; } else zigzag++;
+    if(hitAll) totalHit++;
+  }
+  return { n, executed, zigzag, hitExec, totalHit,
+    execRate: executed ? hitExec / executed : null, baseRate: n ? totalHit / n : null };
+}
 // dicampur pasaran lain), dicocokkan ke zona aman hasil "pelajari zona". Disimpan terpisah per pasaran.
 function showExecution(){
   const ms = markets(), cur = pickDefaultCur(ms);
@@ -756,7 +811,7 @@ async function handle(rawText){
   if(/^rapor/.test(t)) return say(raporText());
   if(/^(?:tebak\s*cf|cf\s*tebak)/.test(t)) return askCfGuess();
   if((m = t.match(/^(?:backtest\s*cf|cf\s*backtest)(?:\s+(\d+))?$/))) return runCfBacktest(m[1] ? +m[1] : 60);
-  if(/^pelajari\s*zona|^zona\s*pelajari/.test(t)) return learnZones();
+  if((m = t.match(/^(?:pelajari\s*zona|zona\s*pelajari)\b\s*(?:dengan\s+kunci\s+|kunci\s+)?(.*)$/))) return learnZones(m[1]);
   if(/^eksekusi/.test(t)) return showExecution();
   if(/^(?:uji\s*cf|cf\s*uji)/.test(t)){
     if(!cur) return say('Belum ada pasaran aktif.');
