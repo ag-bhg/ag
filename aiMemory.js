@@ -21,7 +21,8 @@ const LS_CHAT = 'aiMemory_chat_v1';
 const LS_PATTERNS = 'aiMemory_patterns_v1';
 const LS_BRAIN = 'aiMemory_brain_v1';
 const LS_CF = 'aiMemory_cf_v1'; // Tahap 1: tebakan Cloudflare AI (shadow-track) per pasaran
-const LS_ZONE = 'aiMemory_zone_v1'; // Zona Aman Streak: hasil belajar (pool semua pasaran) + keputusan eksekusi PER pasaran
+const LS_ZONE = 'aiMemory_zone_v1'; // Zona Aman Streak (LAMA, dipertahankan agar tidak menghapus riwayat — lihat aiRiskManager.js utk lapis keputusan yg menggantikannya)
+const LS_GUARD = 'aiMemory_guard_v1'; // Risk Manager (blueprint Sekring): guard {mode, zigIdx, out} + audit terakhir PER pasaran
 
 function hasDb(){ return typeof db !== 'undefined' && db && typeof authReadyPromise !== 'undefined'; }
 
@@ -42,7 +43,8 @@ function loadAll(){
     patterns: lsGet(LS_PATTERNS, {}),
     brain: lsGet(LS_BRAIN, {}),
     cf: lsGet(LS_CF, {}),
-    zone: lsGet(LS_ZONE, {})
+    zone: lsGet(LS_ZONE, {}),
+    guard: lsGet(LS_GUARD, {})
   };
   if(!hasDb()) return Promise.resolve(Object.assign({ synced: false }, local));
   return authReadyPromise.then(isAuthed => {
@@ -57,10 +59,11 @@ function loadAll(){
           brain: v.brain || local.brain,
           cf: v.cf || local.cf,
           zone: v.zone || local.zone,
+          guard: v.guard || local.guard,
           synced: true
         };
         lsSet(LS_PREFS, merged.prefs); lsSet(LS_CHAT, merged.chat);
-        lsSet(LS_PATTERNS, merged.patterns); lsSet(LS_BRAIN, merged.brain); lsSet(LS_CF, merged.cf); lsSet(LS_ZONE, merged.zone);
+        lsSet(LS_PATTERNS, merged.patterns); lsSet(LS_BRAIN, merged.brain); lsSet(LS_CF, merged.cf); lsSet(LS_ZONE, merged.zone); lsSet(LS_GUARD, merged.guard);
         return merged;
       })
       .catch(e => { console.error('AiMemory: gagal baca cloud, pakai ingatan lokal', e); return Object.assign({ synced: false }, local); });
@@ -133,7 +136,23 @@ function saveZoneEntry(name, entry){
   });
 }
 
-const API = { loadAll, savePrefs, saveChat, savePatterns, saveBrainResult, saveCfEntry, saveZoneEntry, encodeKey };
+// Risk Manager (blueprint Sekring) — DITIMPA tiap update, satu entri per pasaran ('GLOBAL' tidak
+// dipakai di sini karena, beda dari Zona Aman Streak lama, guard blueprint ini murni per-pasaran
+// (toleransi & target diukur dari riwayat pasaran itu sendiri, bukan pool lintas-pasaran).
+function saveGuardEntry(name, entry){
+  const key = encodeKey(name);
+  const local = lsGet(LS_GUARD, {});
+  local[key] = entry; lsSet(LS_GUARD, local);
+  if(!hasDb()) return Promise.resolve({ synced: false, reason: 'no-db' });
+  return authReadyPromise.then(isAuthed => {
+    if(!isAuthed) return { synced: false, reason: 'unauth' };
+    return db.ref('aiMemory/guard/' + key).set(entry)
+      .then(() => ({ synced: true }))
+      .catch(e => { console.error('AiMemory: gagal sync guard/' + key, e); return { synced: false, reason: 'error', error: e }; });
+  });
+}
+
+const API = { loadAll, savePrefs, saveChat, savePatterns, saveBrainResult, saveCfEntry, saveZoneEntry, saveGuardEntry, encodeKey };
 if(typeof module !== 'undefined' && module.exports) module.exports = API;
 root.AiMemory = API;
 })(typeof window !== 'undefined' ? window : globalThis);
